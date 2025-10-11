@@ -17,3 +17,12 @@ python plan_greedy.py
 
 # 4) 导出“单行堆叠版”覆盖汇总
 python analysis.py
+
+
+
+
+git status                       # 看看改了什么（可选）
+git add -A                       # 收集所有改动（新增/修改/删除）
+git commit -m "feat: 你的更新说明"  # 本地提交
+git pull --rebase origin main    # 先把远端的最新改动叠到前面（更干净）
+git push                         # 推到 GitHub

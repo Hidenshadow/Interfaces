@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <title>Tasking Visualization — Resizable Timelines (Per-User Palette Colors)</title>
+  <title>Tasking Visualization — Resizable Timelines</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
   <!-- Leaflet -->
@@ -45,7 +45,7 @@
     #upper{
       display:grid; grid-template-columns:1fr 360px;
       min-height:300px;
-      height:64%;
+      height:64%;            /* 初始比例，高度会被 JS 改写 */
       border-bottom:1px solid var(--border);
     }
     #map{height:100%;width:100%}
@@ -85,7 +85,7 @@
     .kpi .card{background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 10px;min-width:120px}
     .kpi .label{font-size:11px;color:var(--mute)}
     .kpi .val{font-size:16px;font-weight:700}
-    .legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .legend{display:flex;gap:10px;align-items:center}
     .dot{width:10px;height:10px;border-radius:50%}
     .dot.plan{background:var(--ok)}
     .dot.noplan{background:#cbd5e1}
@@ -94,8 +94,8 @@
 
     /* Bottom timelines (resizable target) */
     #bottom{
-      height:36%;
-      min-height:120px;
+      height:36%;            /* 初始比例，高度会被 JS 改写/拖拽更新 */
+      min-height:120px;      /* JS 里也会限制 */
       display:flex; flex-direction:column;
     }
     #bottom.collapsed{height:44px !important; min-height:44px !important;}
@@ -136,7 +136,7 @@
 <body>
 <header>
   <div class="title">Tasking Visualization</div>
-  <div class="sub">Loads <b>test.csv</b> + <b>plan_greedy.csv</b> (or <b>coverage_summary_minimal.csv</b>)</div>
+  <div class="sub">Loads <b>test.csv</b> + <b>plan_milp.csv</b> (or <b>coverage_summary_minimal.csv</b>)</div>
 </header>
 <div id="alert"></div>
 
@@ -187,6 +187,7 @@
             <div class="label">Avg / Max gap (h)</div>
             <div class="val"><span id="kAvg">-</span> / <span id="kMax">-</span></div>
           </div>
+          <!-- 新增：Coverage(%) -->
           <div class="card">
             <div class="label">Coverage (%)</div>
             <div class="val" id="kCov">-</div>
@@ -194,13 +195,7 @@
         </div>
       </div>
 
-      <!-- User color legend -->
-      <div class="panel" id="userLegendPanel">
-        <h3>User colors (filtered)</h3>
-        <div id="userLegend" class="legend"></div>
-      </div>
-
-      <!-- Per-user KPIs (filtered) -->
+      <!-- 新增：Per-user KPIs (filtered) -->
       <div class="panel">
         <h3>Per-user KPIs (filtered)</h3>
         <div class="muted">Calculated on the current filtered set.</div>
@@ -242,7 +237,7 @@
    Config
    ========================= */
 const PATH_TASKS = 'test.csv';
-const PATH_PLAN_DETAIL = 'plan_greedy.csv';
+const PATH_PLAN_DETAIL = 'plan_milp.csv';
 const PATH_PLAN_SUMMARY = 'coverage_summary_minimal.csv';
 
 /* =========================
@@ -259,9 +254,9 @@ let planType = null;
 let isDragging = false;
 let dragStartY = 0;
 let startBottomH = 0;
-let savedBottomH = 260;
+let savedBottomH = 260;   // restore height when从折叠恢复
 const MIN_BOTTOM = 120;
-const MIN_UPPER  = 280;
+const MIN_UPPER  = 280;   // 保证地图区域不至于太小
 
 /* =========================
    Helpers
@@ -295,35 +290,7 @@ function downloadCSV(filename, rows){
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
 }
-function colorForSat(name){
-  const s=String(name||'UNKNOWN'); let h=0; for(let i=0;i<s.length;i++) h=(h*131+s.charCodeAt(i))>>>0;
-  return `hsl(${h%360},70%,50%)`;
-}
-
-/* === NEW: user normalization + palette hash color === */
-// Normalize user name: trim and lower for stable hashing
-function normalizeUser(u){
-  return (u == null ? '' : String(u)).trim().toLowerCase();
-}
-// Simple 32-bit hash (djb2-like)
-function hash32(str){
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
-  return (h >>> 0);
-}
-// Distinct categorical palette (high-contrast)
-const USER_PALETTE = [
-  '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b',
-  '#e377c2','#7f7f7f','#bcbd22','#17becf',
-  '#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00',
-  '#ffff33','#a65628','#f781bf','#999999'
-];
-// Deterministic, vivid per-user color using palette + hash
-function colorForUser(name){
-  const key = normalizeUser(name) || 'unknown';
-  const idx = hash32(key) % USER_PALETTE.length;
-  return USER_PALETTE[idx];
-}
+function colorForSat(name){ const s=String(name||'UNKNOWN'); let h=0; for(let i=0;i<s.length;i++) h=(h*131+s.charCodeAt(i))>>>0; return `hsl(${h%360},70%,50%)`; }
 
 /* --- timeline SVG --- */
 function buildTimelineSVG(pt, width=860, height=64){
@@ -339,8 +306,7 @@ function buildTimelineSVG(pt, width=860, height=64){
 
   const obs=(pt.timesSat&&pt.timesSat.length)? pt.timesSat.map(([dd,s])=>({t:+dd,sat:s})) : (pt.times||[]).map(dd=>({t:+dd,sat:'UNKNOWN'}));
   const dots=obs.filter(o=>o.t>=t0&&o.t<=t1).map(o=>{
-    const cx=x(o.t), fill=colorForSat(o.sat); // 若想按用户上色，改为 colorForUser(pt.user)
-    const label=`${(new Date(o.t)).toISOString().replace('.000','').replace('T',' ').replace('Z','Z')} @ ${o.sat}`;
+    const cx=x(o.t), fill=colorForSat(o.sat); const label=`${(new Date(o.t)).toISOString().replace('.000','').replace('T',' ').replace('Z','Z')} @ ${o.sat}`;
     return `<circle class="tl-dot" cx="${cx.toFixed(1)}" cy="${y}" r="4.5" fill="${fill}"><title>${label}</title></circle>`;
   }).join('');
 
@@ -364,7 +330,7 @@ function buildTimelineSVG(pt, width=860, height=64){
     </div>`;
 }
 
-/* --- popup with stats + timeline --- */
+/* --- popup with stats + timeline (unchanged style) --- */
 function popupHTML(pt){
   const timesHTML = (pt.timesSat && pt.timesSat.length)
     ? pt.timesSat.map(([d,s])=>`<code class="mono">${fmtUTC(d)} @ ${s}</code>`).join('<br/>')
@@ -400,7 +366,7 @@ async function loadAll(){
   // tasks
   const rawTasks=await parseCSV(PATH_TASKS);
   tasks=rawTasks.map(r=>{
-    const user = normalizeUser(pick(r,['user','username','User'])); // normalized for color/group
+    const user=pick(r,['user','username','User']);
     const point_id=pick(r,['point_id','point','id','pointId','PointID']);
     const lat=parseFloat(pick(r,['lat','latitude','lat_center','Lat','Latitude']));
     const lon=parseFloat(pick(r,['lon','longitude','lon_center','Lon','Longitude']));
@@ -418,7 +384,7 @@ async function loadAll(){
   const planByKey=new Map();
   if (planType==='detail'){
     for(const r of planRows){
-      const user = normalizeUser(pick(r,['user','User'])); const pid=pick(r,['point_id','point','PointID','id']); if(!user||!pid) continue;
+      const user=pick(r,['user','User']); const pid=pick(r,['point_id','point','PointID','id']); if(!user||!pid) continue;
       const tmid=toUTCDate(pick(r,['t_mid','t_mid_utc','tmid'])); if(!tmid) continue;
       const sat=(pick(r,['satellite','sat','sat_name'])||'').trim()||'UNKNOWN';
       const ent=planByKey.get(keyOf(user,pid))||{times:[],timesSat:[],sats:new Set()};
@@ -427,7 +393,7 @@ async function loadAll(){
     }
   }else{
     for(const r of planRows){
-      const user = normalizeUser(pick(r,['user','User'])); const pid=pick(r,['point_id','point','PointID','id']); if(!user||!pid) continue;
+      const user=pick(r,['user','User']); const pid=pick(r,['point_id','point','PointID','id']); if(!user||!pid) continue;
       const key=keyOf(user,pid); const ent=planByKey.get(key)||{times:[],timesSat:[],sats:new Set()};
       const timesStr=pick(r,['observation_times_utc','times'])||'';
       timesStr && timesStr.split('|').map(s=>toUTCDate(s.trim())).filter(Boolean).forEach(d=>ent.times.push(d));
@@ -464,40 +430,23 @@ function initMap(){
   map=L.map('map',{preferCanvas:true}).setView([-25.5,135],4);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap & CARTO'}).addTo(map);
 }
-// Per-user color; keep plan/no-plan via opacity/weight
-function markerStyle(user, hasPlan){
-  const c = colorForUser(user);
-  return {
-    renderer: canvasRenderer,
-    radius: 7,
-    color: c,                         // stroke uses user color
-    weight: hasPlan ? 2 : 1,
-    fillColor: c,                     // fill uses user color
-    fillOpacity: hasPlan ? 0.9 : 0.35 // no-plan appears lighter
-  };
-}
+function markerStyle(hasPlan){ return {renderer:canvasRenderer,radius:6,color:hasPlan?'#1e6bd6':'#94a3b8',weight:2,fillColor:hasPlan?'#4aa3ff':'#cbd5e1',fillOpacity:.9}; }
 function ensureMarker(pt){
   const key=keyOf(pt.user,pt.point_id); if(markers.has(key)) return markers.get(key);
-  const m=L.circleMarker([pt.lat,pt.lon], markerStyle(pt.user, pt.observation_count>0))
-           .bindPopup(()=>popupHTML(pt)).addTo(map);
+  const m=L.circleMarker([pt.lat,pt.lon],markerStyle(pt.observation_count>0)).bindPopup(()=>popupHTML(pt)).addTo(map);
   markers.set(key,m); return m;
 }
 function renderMarkers(list){
-  for (const m of markers.values()) { try { map.removeLayer(m); } catch (_) {} }
-  markers.clear();
-  if (!Array.isArray(list) || list.length === 0) return;
-  const sorted=list.slice().sort((a,b)=> {
-    const u=String(a.user).localeCompare(String(b.user));
-    return u!==0?u:String(a.point_id).localeCompare(String(b.point_id));
-  });
-  const bounds=[];
-  for(const p of sorted){ const m=ensureMarker(p); m.addTo(map); bounds.push([p.lat,p.lon]); }
-  try{ if(bounds.length){ map.fitBounds(L.latLngBounds(bounds).pad(0.15)); } }catch(_){}
+  for(const m of markers.values()){ try{ map.removeLayer(m);}catch(_){}} markers.clear();
+  if(!list.length) return;
+  const bounds=[]; list.forEach(p=>{ const m=ensureMarker(p); m.addTo(map); bounds.push([p.lat,p.lon]); });
+  try{ map.fitBounds(L.latLngBounds(bounds).pad(0.15)); }catch(_){}
 }
 
 /* =========================
-   Coverage helpers
+   Coverage helpers (新增)
    ========================= */
+/** 生成时隙（槽中心，毫秒） */
 function generateSlots(wsMs, weMs, intervalH){
   if(!isFinite(wsMs)||!isFinite(weMs)||!isFinite(intervalH)||intervalH<=0||weMs<=wsMs) return [];
   const step = intervalH * 3600e3;
@@ -506,6 +455,7 @@ function generateSlots(wsMs, weMs, intervalH){
   for(let t=mid0; t<=weMs; t+=step) slots.push(t);
   return slots;
 }
+/** 单点 coverage 统计（±0.5*interval 容差） */
 function coverageForPoint(pt){
   const ws = pt.window_start_utc?.getTime?.(); const we = pt.window_end_utc?.getTime?.(); const iv = +pt.required_interval_hours;
   if(!isFinite(ws)||!isFinite(we)||!isFinite(iv)||iv<=0) return {covered:0,total:0};
@@ -556,10 +506,10 @@ function applyFilters(){
   renderMarkers(filteredPoints);
   updateKPIs(filteredPoints);
   renderBottom(filteredPoints);
-  updateUserLegend(filteredPoints);
 }
-/** KPIs (global + per-user) */
+/** 原有 KPI 口径 + 新增 Coverage(%) & Per-user 表 */
 function updateKPIs(list){
+  // 原有三项
   document.getElementById('kPoints').textContent=String(list.length);
   document.getElementById('kObs').textContent=String(list.reduce((a,b)=>a+b.observation_count,0));
   const avgs=list.map(p=>p.avg_observation_gap_h).filter(x=>x!=null&&isFinite(x));
@@ -567,12 +517,12 @@ function updateKPIs(list){
   document.getElementById('kAvg').textContent=avgs.length?(avgs.reduce((a,b)=>a+b,0)/avgs.length).toFixed(2):'-';
   document.getElementById('kMax').textContent=maxs.length?Math.max(...maxs).toFixed(2):'-';
 
-  // Coverage(%)
+  // 新增：全局 Coverage(%)
   let covCovered=0, covTotal=0;
   for(const p of list){ const c=coverageForPoint(p); covCovered+=c.covered; covTotal+=c.total; }
   document.getElementById('kCov').textContent = covTotal ? (100*covCovered/covTotal).toFixed(1) : '-';
 
-  // Per-user KPIs
+  // 新增：Per-user KPIs (filtered)
   const byUser = new Map();
   for(const p of list){
     if(!byUser.has(p.user)) byUser.set(p.user,{points:0,obs:0,avgGaps:[],maxGaps:[],covered:0,total:0});
@@ -600,15 +550,6 @@ function updateKPIs(list){
       <td style="text-align:right">${isFinite(uCov)?uCov.toFixed(1):'-'}</td>`;
     tbody.appendChild(tr);
   }
-}
-/** User color legend */
-function updateUserLegend(list){
-  const cont = document.getElementById('userLegend');
-  if (!cont) return;
-  const users = [...new Set(list.map(p => p.user))].sort();
-  cont.innerHTML = users.map(u =>
-    `<span class="tl-chip"><i style="background:${colorForUser(u)}"></i>${u}</span>`
-  ).join('');
 }
 
 /* =========================
@@ -749,11 +690,11 @@ function setupSplitter(){
   // Resize
   window.addEventListener('resize', ()=>{
     if (bottom.classList.contains('collapsed')) return;
-    const maxBottom = Math.max(MIN_BOTTOM, document.getElementById('main').clientHeight - MIN_UPPER - splitter.clientHeight);
+    const maxBottom = Math.max(MIN_BOTTOM, mainHeight() - MIN_UPPER - splitter.clientHeight);
     let cur = currentBottom();
     cur = Math.min(Math.max(cur, MIN_BOTTOM), maxBottom);
     bottom.style.height = cur + 'px';
-    upper.style.height  = (document.getElementById('main').clientHeight - cur - splitter.clientHeight) + 'px';
+    upper.style.height  = (mainHeight() - cur - splitter.clientHeight) + 'px';
     setTimeout(()=>{ try{ map.invalidateSize(); }catch(_){} renderBottom(filteredPoints); }, 0);
   });
 }
