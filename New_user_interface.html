@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>WP4: Dynamic Tasking Platform</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Leaflet.draw -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+
+  <style>
+    :root{
+      /* Blue theme */
+      --brand:#1f6fe5;
+      --brand-dark:#184fb0;
+      --accent:#2ecc71;
+      --warn:#f7c87a;
+      --danger:#e55353;
+      --text:#0f1a2b;
+      --muted:#6e7b8f;
+      --bg:#f3f6fb;
+      --card:#ffffff;
+      --border:#e1e6f0;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);background:#fff}
+
+    header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--brand);color:#fff;font-weight:700;letter-spacing:.2px;position:sticky;top:0;z-index:1000}
+
+    #app{display:grid;grid-template-columns:1fr 380px;height:calc(100vh - 56px)}
+    #map{width:100%;height:100%}
+    #right{border-left:1px solid var(--border);overflow:auto;background:var(--bg)}
+
+    .panel{background:var(--card);border-bottom:1px solid var(--border);padding:12px 14px}
+    .panel h3{margin:0 0 8px;font-size:16px}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .row>*{flex:0 0 auto}
+    .muted{color:var(--muted);font-size:12px}
+    .small-btn{padding:7px 12px;border:0;border-radius:8px;background:var(--brand);color:#fff;font-weight:600;cursor:pointer;box-shadow:0 2px 0 var(--brand-dark)}
+    .small-btn:hover{filter:brightness(.97)}
+    .small-btn:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+    .danger{background:var(--danger);box-shadow:0 2px 0 #b73b3b}
+    .outline{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+    .ghost{background:#fff;color:#2b3a55;border:1px dashed var(--border)}
+
+    #wizard{position:fixed;top:68px;right:calc(380px + 16px);z-index:1200;background:rgba(255,255,255,.98);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 28px rgba(21,32,56,.18);padding:12px;min-width:380px;max-width:460px}
+    #wizard h4{margin:4px 0 8px}
+    #steps{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+    .step-pill{padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:12px}
+    .step-pill.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+    .step-pill.done{background:#e7f0ff;color:#11408a;border-color:#c9dcff}
+    .wizard-nav{display:flex;justify-content:space-between;margin-top:8px}
+
+    @media (max-width:1200px){#app{grid-template-columns:1fr 320px}#wizard{right:calc(320px + 16px)}}
+    @media (max-width:980px){#wizard{left:10px;right:auto;top:10px;width:min(96vw,440px)}}
+
+    #selected-list{width:100%;border-collapse:collapse;font-size:12px}
+    #selected-list th,#selected-list td{border-bottom:1px solid var(--border);padding:6px 6px;text-align:left}
+    #selected-list th{position:sticky;top:0;background:var(--bg);z-index:1}
+    #selected-list input[type=number]{width:80px;padding:4px;border:1px solid var(--border);border-radius:6px}
+    #selected-list .check-cell{width:26px;text-align:center;}
+
+    .legend-inline{background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 10px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+    .legend-item{display:flex;align-items:center;gap:8px;margin:4px 0}
+    .dot{width:10px;height:10px;border-radius:50%;border:1px solid #0002;display:inline-block}
+
+    .listbox{max-height:230px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:8px;background:#fff}
+    .sat-item{display:flex;align-items:center;gap:8px;padding:4px 2px}
+    .sat-chip{display:inline-block;padding:2px 8px;border-radius:999px;background:#f3f6fb;border:1px solid #dfe7f7;font-size:12px}
+
+    /* Cover page */
+    #cover{
+      position:fixed;inset:0;z-index:2000;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      background: radial-gradient(1200px 600px at 30% 20%, #2b6ddf 0%, #144a9a 45%, #0e356f 100%);
+      color:#fff;text-align:center;padding:32px;
+    }
+    #cover h1{font-size:42px;line-height:1.2;margin:0 0 12px;font-weight:800;letter-spacing:.3px}
+    #cover p{opacity:.92;margin:0 0 20px}
+    #cover .enter{padding:12px 22px;border:0;border-radius:10px;background:#fff;color:#0f2f73;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+    #cover .enter:hover{filter:brightness(.96)}
+    .hidden{display:none !important}
+
+    /* Done modal */
+    .overlay{position:fixed;inset:0;background:rgba(10,20,40,.45);backdrop-filter:blur(2px);z-index:2200}
+    .dialog{position:fixed;inset:auto;left:50%;top:20vh;transform:translateX(-50%);z-index:2210;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:0 16px 40px rgba(8,16,32,.25);padding:16px;min-width:360px;max-width:90vw}
+    .dialog h4{margin:0 0 8px}
+    .dialog .footer{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+  </style>
+</head>
+<body>
+  <!-- Cover -->
+  <div id="cover" aria-label="Cover">
+    <h1>🔥 WP4: Dynamic Tasking Platform 🔥</h1>
+    <p>🔥 Use-case: Dynamic Planning for Fire Monitoring Tasks 🔥</p>
+    <button class="enter" id="btnEnter">Enter Platform</button>
+  </div>
+
+  <header>
+    <div>Dynamic Tasking Platform — RAW Hotspots + Satellites (Wizard)</div>
+  </header>
+
+  <div id="app">
+    <div id="map"></div>
+
+    <!-- Right sidebar -->
+    <aside id="right">
+      <div class="panel">
+        <h3>Selected Fire Points (per user)</h3>
+        <div class="row" style="margin-bottom:8px">
+          <button class="small-btn" id="btnSetAll12">Set All to 12h</button>
+          <button class="small-btn outline" id="btnExportUser">Export current user CSV</button>
+          <button class="small-btn danger" id="btnRemoveSelected">Remove selected</button>
+          <button class="small-btn ghost" id="btnClearAll">Clear all</button>
+        </div>
+        <table id="selected-list">
+          <thead>
+          <tr>
+            <th class="check-cell"><input type="checkbox" id="checkAllRows" title="Select / unselect all"/></th>
+            <th>#</th><th>Lat</th><th>Lon</th><th>Fire Count</th><th>Freq (h)</th><th>Action</th>
+          </tr>
+          </thead>
+          <tbody id="selected-tbody"></tbody>
+        </table>
+        <div class="muted" style="margin-top:6px">Tip: Click points on map to toggle select; use “Select by Rectangle” in Step 3.</div>
+      </div>
+
+      <div class="panel">
+        <h3>Add Custom Point</h3>
+        <div class="row">
+          <label>Lat <input type="number" id="customLat" step="0.00001" placeholder="e.g., -27.12345"/></label>
+          <label>Lon <input type="number" id="customLon" step="0.00001" placeholder="e.g., 150.12345"/></label>
+          <button class="small-btn" id="btnAddCustom">Add</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Export (raw selections)</h3>
+        <div class="row">
+          <button class="small-btn" id="btnExportAll">Export all users CSV</button>
+          <span id="exportStatus" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div><span class="muted">Tiles/Tracks status:</span> <span id="sideStatus">Not loaded yet</span></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Wizard -->
+  <div id="wizard" role="dialog" aria-label="Planning Wizard">
+    <div id="steps"></div>
+
+    <!-- Step 1 -->
+    <div id="step1" class="wizard-step">
+      <h4>Step 1 — Create / Select User</h4>
+      <div class="row" style="margin-bottom:6px;">
+        <label>User: <select id="userSelect"></select></label>
+        <input type="text" id="newUserName" placeholder="New user name"/>
+        <button class="small-btn" id="btnAddUser">Add / Select</button>
+      </div>
+      <div class="muted">Create a new user or select an existing one. Required before continuing.</div>
+    </div>
+
+    <!-- Step 2 -->
+    <div id="step2" class="wizard-step" style="display:none">
+      <h4>Step 2 — Choose Fire Points Time Span (RAW data)</h4>
+      <div class="row"><span class="muted" id="tileDateHint">Data window available: (loading…)</span></div>
+      <div class="row" style="margin-top:4px;">
+        Start: <input type="date" id="dataStart">
+        End: <input type="date" id="dataEnd">
+        <button class="small-btn" id="btnLoadTiles" disabled>Load data window</button>
+      </div>
+      <div class="legend-inline" style="margin-top:6px;">
+        <div class="legend-item"><span class="dot" style="background:var(--warn);"></span> RAW point</div>
+        <div class="legend-item"><span class="dot" style="background:var(--accent);"></span> Selected</div>
+      </div>
+      <div class="muted" style="margin-top:6px;">This window filters the historical detections to display and select from.</div>
+    </div>
+
+    <!-- Step 3 -->
+    <div id="step3" class="wizard-step" style="display:none">
+      <h4>Step 3 — Select Fire Points</h4>
+      <div class="row" style="margin-bottom:6px;">
+        <button class="small-btn" id="btnRectSelect">Select by Rectangle</button>
+      </div>
+      <div class="muted">Click points on the map to select/unselect. Use the right panel to edit, bulk-remove, or set per-point frequency.</div>
+    </div>
+
+    <!-- Step 4 -->
+    <div id="step4" class="wizard-step" style="display:none">
+      <h4>Step 4 — Observation Window & Default Interval</h4>
+      <div class="row" id="obsDateRow"><span class="muted" id="obsHint">Observation window (example): 2025-01-01 → 2025-01-20. You can change anytime.</span></div>
+      <div class="row" style="margin-top:4px;">
+        Start: <input type="date" id="obsStart">
+        End: <input type="date" id="obsEnd">
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <label>Default required interval (h)
+          <input type="number" id="defaultInterval" min="1" step="1" value="4" style="width:80px;padding:5px"/>
+        </label>
+        <span class="muted">Per-point frequency in the list overrides this value.</span>
+      </div>
+    </div>
+
+    <!-- Step 5 -->
+    <div id="step5" class="wizard-step" style="display:none">
+      <h4>Step 5 — Satellites</h4>
+      <div class="row" style="margin-top:2px;">
+        <label><input type="checkbox" id="chkShowTracks"/> Show ground track</label>
+      </div>
+      <div class="row" style="margin-top:4px;">
+        <span class="muted" id="satDates">Observation window: —</span>
+      </div>
+      <div style="margin-top:6px;">
+        <div class="muted" id="satSourceHint">Loading tracks/index.json…</div>
+        <div class="listbox" id="satList" aria-label="Available satellites"></div>
+      </div>
+      <div class="row" style="margin-top:8px;justify-content:flex-end;">
+        <button class="small-btn outline" id="btnClearSats">Clear satellites</button>
+        <button class="small-btn" id="btnExportTaskCSV">Export task request CSV</button>
+      </div>
+    </div>
+
+    <div class="wizard-nav">
+      <button class="small-btn ghost" id="btnPrev" disabled>Back</button>
+      <button class="small-btn" id="btnNext" disabled>Next</button>
+    </div>
+  </div>
+
+  <!-- Done modal -->
+  <div id="doneOverlay" class="overlay hidden"></div>
+  <div id="doneDialog" class="dialog hidden" role="dialog" aria-modal="true" aria-label="Complete">
+    <h4>All set! What do you want to do next?</h4>
+    <div class="muted">You can add another user, export all users’ CSV, or exit.</div>
+    <div class="footer">
+      <button class="small-btn ghost" id="btnDoneAddUser">Add another user</button>
+      <button class="small-btn outline" id="btnDoneExportAll">Export all users CSV</button>
+      <button class="small-btn danger" id="btnExit">Exit</button>
+    </div>
+  </div>
+
+  <script>
+    // =========================
+    // Config
+    // =========================
+    const TILE_DIR = 'tiles';
+    const TRACK_DIR = 'tracks';
+
+    const OBS_DEFAULT_START = '2025-01-01';
+    const OBS_DEFAULT_END   = '2025-01-20';
+    const OBS_MIN = '2024-01-01';
+    const OBS_MAX = '2026-12-31';
+
+    // =========================
+    // Globals
+    // =========================
+    let META=null, INDEX=null;
+    let TRACK_INDEX=null;
+
+    let TILE_MIN_DATE=null, TILE_MAX_DATE=null;
+
+    const users = {}; let currentUser=null;
+
+    let wizardStep = 1;
+    const steps = ['User','Data Window','Select Points','Observation','Satellites'];
+
+    const dataDates=[];   // RAW tiles dates
+    const obsDates=[];    // observation window dates
+
+    // ---- per-user satellites (bugfix) ----
+    const satellitesByUser = {}; // { username: Set<string> }
+    const selectedSats = new Set(); // legacy global; mirror current user for兼容
+
+    function getCurrentSatSet(){
+      if (!currentUser) return selectedSats; // fallback
+      if (!satellitesByUser[currentUser]) satellitesByUser[currentUser] = new Set();
+      return satellitesByUser[currentUser];
+    }
+    function syncSelectedSatsFromUser(){
+      const set = getCurrentSatSet();
+      selectedSats.clear();
+      set.forEach(s => selectedSats.add(s));
+    }
+
+    // Map
+    const canvasRenderer = L.canvas({ padding: 0.2 });
+    const map = L.map('map', { preferCanvas: true }).setView([0, 0], 2);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {maxZoom:19,attribution:'&copy; OpenStreetMap & CARTO'}).addTo(map);
+
+    // Helpers — dates
+    function pad2(n){ return String(n).padStart(2,'0'); }
+    function ymd_UTC(d){ return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())}`; }
+    function parseYMD(s){ const [y,m,d]=s.split('-').map(Number); return new Date(Date.UTC(y,m-1,d)); }
+    function listDays(start,end){ const out=[]; for(let d=parseYMD(start); d<=parseYMD(end); d.setUTCDate(d.getUTCDate()+1)) out.push(ymd_UTC(d)); return out; }
+
+    function setupObservationPickers(){
+      const s=document.getElementById('obsStart'), e=document.getElementById('obsEnd');
+      if(OBS_MIN){ s.min=OBS_MIN; e.min=OBS_MIN; }
+      if(OBS_MAX){ s.max=OBS_MAX; e.max=OBS_MAX; }
+      s.value=OBS_DEFAULT_START; e.value=OBS_DEFAULT_END;
+      document.getElementById('obsHint').textContent = `Observation window (example): ${OBS_DEFAULT_START} → ${OBS_DEFAULT_END}. You can change anytime.`;
+    }
+
+    function setStep(n){
+      wizardStep=n;
+      const stepsBar=document.getElementById('steps'); stepsBar.innerHTML='';
+      for(let i=1;i<=5;i++){
+        const pill=document.createElement('span');
+        pill.className='step-pill'+(i===n?' active':(i<n?' done':'')); pill.textContent=`${i}. ${steps[i-1]}`;
+        stepsBar.appendChild(pill);
+      }
+      for(let i=1;i<=5;i++){ document.getElementById('step'+i).style.display=(i===n?'block':'none'); }
+      updateWizardButtons();
+    }
+
+    function updateWizardButtons(){
+      const prev=document.getElementById('btnPrev');
+      const next=document.getElementById('btnNext');
+      prev.disabled=(wizardStep===1);
+      let canNext=false;
+      if(wizardStep===1){ canNext=!!currentUser; }
+      else if(wizardStep===2){ canNext=dataDates.length>0; }
+      else if(wizardStep===3){ canNext=(users[currentUser]||[]).length>0; }
+      else if(wizardStep===4){
+        const s=document.getElementById('obsStart').value;
+        const e=document.getElementById('obsEnd').value;
+        canNext=!!(s && e && e>=s);
+      } else if(wizardStep===5){
+        canNext=true; // Done enabled
+      }
+      next.disabled=!canNext; next.textContent=(wizardStep<5?'Next':'Done');
+    }
+
+    // =========================
+    // Tiles: grid helpers & loading
+    // =========================
+    function dLat(){ return (META.lat_max - META.lat_min) / META.ny; }
+    function dLon(){ return (META.lon_max - META.lon_min) / META.nx; }
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+    function latToRow(lat){ let r=Math.floor((lat - META.lat_min)/dLat()); return clamp(r, 0, META.ny-1); }
+    function lonToCol(lon){ let c=Math.floor((lon - META.lon_min)/dLon()); return clamp(c, 0, META.nx-1); }
+    function rcRangeForBounds(bounds){
+      const sw=bounds.getSouthWest(), ne=bounds.getNorthEast();
+      let r0=latToRow(sw.lat), r1=latToRow(ne.lat); if(r1<r0)[r0,r1]=[r1,r0];
+      let c0=lonToCol(sw.lng), c1=lonToCol(ne.lng); if(c1<c0)[c0,c1]=[c0,c1];
+      return { r0, r1, c0, c1 };
+    }
+
+    const MAX_CONCURRENT_FETCHES=10;
+    const fetchQueue=[]; let inflight=0;
+    function schedule(taskFn){ return new Promise((resolve,reject)=>{ fetchQueue.push({taskFn,resolve,reject}); pump(); }); }
+    function pump(){
+      while(inflight<MAX_CONCURRENT_FETCHES && fetchQueue.length){
+        const {taskFn,resolve,reject}=fetchQueue.shift();
+        inflight++; taskFn().then(v=>{inflight--;pump();resolve(v);}).catch(e=>{inflight--;pump();reject(e);});
+      }
+    }
+
+    const tileCache=new Map(); // date -> Map("r|c" -> entry)
+    function dateCache(d){ if(!tileCache.has(d)) tileCache.set(d,new Map()); return tileCache.get(d); }
+    function rcKey(r,c){ return r+'|'+c; }
+    function tilePath(d,r,c){ return `${TILE_DIR}/${d}/r${r}_c${c}.json`; }
+
+    function idForPoint(date, lat, lon, time, idx){ const t=(time??'').toString().padStart(4,'0'); return `${date}|${t}|${lat}|${lon}|${idx}`; }
+    function varGet(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+    function baseStyle(){ return {renderer:canvasRenderer, radius:5, color:'#f39c12', fillColor:varGet('--warn'), fillOpacity:.9, weight:1}; }
+    function selectedStyle(){ return {renderer:canvasRenderer, radius:6, color:varGet('--accent'), fillColor:varGet('--accent'), fillOpacity:.92, weight:2}; }
+    const b=v=>(v===undefined||v===null||v==='')?'—':v;
+
+    function createMarker(pt){
+      const m=L.circleMarker([pt.lat, pt.lon], baseStyle());
+      m._rawId=pt.id;
+      m.bindPopup(()=>`
+        <div><b>RAW detection</b></div>
+        <div>Date: ${b(pt.date)} Time: ${b(pt.time)}</div>
+        <div>Brightness: ${b(pt.brightness)}</div>
+        <div>Lat: ${pt.lat.toFixed(5)}, Lon: ${pt.lon.toFixed(5)}</div>
+        <div style="margin-top:4px;"><em>Click to select/unselect.</em></div>
+      `);
+      m.on('click',()=>togglePoint(pt.id));
+      return m;
+    }
+
+    function loadTile(d,r,c){
+      const cache=dateCache(d); const key=rcKey(r,c); const existed=cache.get(key);
+      if(existed) return existed.promise;
+
+      const entry={state:'loading', points:[], markers:[], layer:L.layerGroup(), added:false, promise:null};
+      entry.promise = schedule(async()=>{
+        const res=await fetch(tilePath(d,r,c), {cache:'force-cache'});
+        if(!res.ok) throw new Error(`Tile not found ${d} r${r}_c${c} (${res.status})`);
+        const js=await res.json();
+        const raw=Array.isArray(js.points)?js.points:[];
+        entry.points=raw.map((arr,i)=>({ id:idForPoint(d,+arr[0],+arr[1],arr[3]??'',i), date:d, lat:+arr[0], lon:+arr[1], brightness:arr[2]??'', time:arr[3]??'' }));
+        for(const pt of entry.points){ const mk=createMarker(pt); entry.markers.push(mk); entry.layer.addLayer(mk); }
+        entry.state='ready'; return entry;
+      }).catch(err=>{ entry.state='error'; entry.error=err; throw err; });
+
+      cache.set(key, entry); return entry.promise;
+    }
+
+    function addTile(entry){ if(!entry||entry.added||entry.state!=='ready')return; entry.layer.addTo(map); entry.added=true; restyleTileMarkers(entry); }
+    function removeTile(entry){ if(!entry||!entry.added)return; try{ map.removeLayer(entry.layer);}catch(_){} entry.added=false; }
+    function restyleTileMarkers(entry){
+      const arr=users[currentUser]||[]; const sel=new Set(arr.map(s=>s.id));
+      for(const mk of entry.markers){ mk.setStyle(sel.has(mk._rawId)?selectedStyle():baseStyle()); }
+    }
+    function clearAllTiles(){ for(const [,cache] of tileCache.entries()){ for(const [,e] of cache.entries()){ removeTile(e); } } tileCache.clear(); }
+    function unstyleMarkerById(id){
+      for(const [,cache] of tileCache.entries()){
+        for(const [,entry] of cache.entries()){
+          if(!entry.added) continue;
+          const mk=entry.markers.find(m=>m._rawId===id);
+          if(mk){ mk.setStyle(baseStyle()); return true; }
+        }
+      }
+      return false;
+    }
+
+    async function dataMoveHandler(){
+      if(!META||!INDEX||dataDates.length===0) return;
+      const bnds=map.getBounds(); const {r0,r1,c0,c1}=rcRangeForBounds(bnds);
+
+      const needed=new Map();
+      for(const d of dataDates){
+        const set=new Set(); const avail=INDEX[d]||[]; const has=new Set(avail.map(x=>rcKey(x[0],x[1])));
+        for(let r=r0;r<=r1;r++){ for(let c=c0;c<=c1;c++){ const key=rcKey(r,c); if(has.has(key)) set.add(key); } }
+        needed.set(d,set);
+      }
+
+      const promises=[];
+      for(const d of dataDates){
+        const set=needed.get(d); const cache=dateCache(d);
+        for(const key of set){ if(!cache.has(key)){ const [r,c]=key.split('|').map(Number); promises.push(loadTile(d,r,c)); } }
+      }
+      await Promise.allSettled(promises);
+
+      let total=0, ready=0, active=0, visiblePts=0;
+      for(const [d,cache] of tileCache.entries()){
+        for(const [key,entry] of cache.entries()){
+          total++; if(entry.state==='ready') ready++;
+          const shouldOn=dataDates.includes(d) && needed.get(d)?.has(key);
+          if(shouldOn && entry.state==='ready'){ addTile(entry); active++; visiblePts+=entry.points.length; }
+          else{ removeTile(entry); }
+        }
+      }
+      document.getElementById('sideStatus').textContent=`Tiles ready: ${ready}/${total} | Active on map: ${active} | Visible RAW: ${visiblePts.toLocaleString()}`;
+    }
+
+    // =========================
+    // Selection & sidebar
+    // =========================
+    const drawnItems=new L.FeatureGroup(); map.addLayer(drawnItems);
+    const drawControl=new L.Control.Draw({
+      draw:{polygon:false,circle:false,circlemarker:false,marker:false,polyline:false,rectangle:{repeatMode:false,showArea:false}},
+      edit:{featureGroup:drawnItems,edit:false,remove:true}
+    });
+    let drawEnabled=false;
+    function enableRectangleSelection(){
+      if(drawEnabled) return; drawEnabled=true; map.addControl(drawControl);
+      const drawer=new L.Draw.Rectangle(map, drawControl.options.draw.rectangle); drawer.enable();
+      function onCreated(e){
+        const bounds=e.layer.getBounds(); let added=0; ensureUser(currentUser);
+        for(const [,cache] of tileCache.entries()){
+          for(const [,entry] of cache.entries()){
+            if(!entry.added) continue;
+            for(const mk of entry.markers){
+              if(bounds.contains(mk.getLatLng())){
+                const id=mk._rawId; const arr=users[currentUser];
+                if(arr.findIndex(s=>s.id===id)===-1){
+                  const ll=mk.getLatLng(); arr.push({id,lat:ll.lat,lon:ll.lng,fire_count:1,frequency:null});
+                  mk.setStyle(selectedStyle()); added++;
+                }
+              }
+            }
+          }
+        }
+        refreshSelectedList();
+        alert(`Added ${added} RAW points to user "${currentUser}".`);
+        map.off(L.Draw.Event.CREATED,onCreated); drawer.disable(); map.removeControl(drawControl); drawEnabled=false; drawnItems.clearLayers();
+      }
+      map.on(L.Draw.Event.CREATED,onCreated);
+    }
+
+    function ensureUser(name){ if(!users[name]) users[name]=[]; }
+    function togglePoint(id){
+      if(!currentUser){ alert('Please add/select a user first.'); return; }
+      ensureUser(currentUser);
+      const arr=users[currentUser]; const idx=arr.findIndex(p=>p.id===id);
+
+      let found=null;
+      for(const [,cache] of tileCache.entries()){
+        for(const [,entry] of cache.entries()){
+          if(!entry.added) continue;
+          const mk=entry.markers.find(m=>m._rawId===id);
+          if(mk){ found=mk; break; }
+        } if(found) break;
+      }
+      if(!found) return;
+      const ll=found.getLatLng();
+
+      if(idx===-1){ arr.push({id,lat:ll.lat,lon:ll.lng,fire_count:1,frequency:null}); found.setStyle(selectedStyle()); }
+      else{ arr.splice(idx,1); found.setStyle(baseStyle()); }
+
+      refreshSelectedList();
+    }
+
+    function refreshSelectedList(){
+      const tbody=document.getElementById('selected-tbody'); tbody.innerHTML='';
+      const arr=users[currentUser]||[];
+      arr.forEach((p,i)=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`
+          <td class="check-cell"><input type="checkbox" class="row-check" data-id="${p.id}"/></td>
+          <td>${i+1}</td>
+          <td>${p.lat.toFixed(5)}</td>
+          <td>${p.lon.toFixed(5)}</td>
+          <td>${p.fire_count}</td>
+          <td><input type="number" min="0" step="1" value="${p.frequency ?? ''}" data-id="${p.id}" class="freq-input" placeholder="e.g., 12"/></td>
+          <td><button class="small-btn danger" data-id="${p.id}">Remove</button></td>`;
+        tbody.appendChild(tr);
+      });
+
+      tbody.querySelectorAll('.freq-input').forEach(inp=>{
+        inp.addEventListener('input',e=>{
+          const id=e.target.getAttribute('data-id');
+          const v=e.target.value===''?null:Math.max(0,Math.round(+e.target.value));
+          const idx=(users[currentUser]||[]).findIndex(p=>p.id===id);
+          if(idx!==-1) users[currentUser][idx].frequency=v;
+        });
+      });
+      tbody.querySelectorAll('button.small-btn.danger').forEach(btn=>{
+        btn.addEventListener('click',e=>{
+          const id=e.target.getAttribute('data-id');
+          const arr=users[currentUser]||[]; const idx=arr.findIndex(p=>p.id===id);
+          if(idx!==-1){ arr.splice(idx,1); unstyleMarkerById(id); refreshSelectedList(); }
+        });
+      });
+
+      document.getElementById('checkAllRows').checked=false;
+      updateWizardButtons();
+    }
+
+    function removeSelectedRows(){
+      const tbody=document.getElementById('selected-tbody');
+      const ids=Array.from(tbody.querySelectorAll('.row-check:checked')).map(cb=>cb.getAttribute('data-id'));
+      if(!ids.length) return;
+      const set=new Set(ids); const arr=users[currentUser]||[];
+      for(const id of set) unstyleMarkerById(id);
+      users[currentUser]=arr.filter(p=>!set.has(p.id));
+      refreshSelectedList();
+    }
+    function clearAllRows(){
+      if(!currentUser) return;
+      const arr=users[currentUser]||[]; if(!arr.length) return;
+      const ok=confirm(`Remove ALL ${arr.length} points for user "${currentUser}"?`); if(!ok) return;
+      for(const p of arr) unstyleMarkerById(p.id);
+      users[currentUser]=[]; refreshSelectedList();
+    }
+
+    // =========================
+    // Satellites / tracks (Step 5) — per-user selection
+    // =========================
+    function satColor(name){ let h=0; for(let i=0;i<name.length;i++){ h=(h*31 + name.charCodeAt(i)) % 360; } return `hsl(${h},70%,45%)`; }
+    function trackKey(date,sat){ return `${date}|${sat}`; }
+    function trackPath(date,sat){ return `${TRACK_DIR}/${date}/${encodeURIComponent(sat)}.json`; }
+
+    const trackCache = new Map(); // date|sat -> {state, layer, promise}
+
+    function loadTrack(date,sat){
+      const key=trackKey(date,sat); const existed=trackCache.get(key);
+      if(existed) return existed.promise;
+      const entry={state:'loading', layer:L.layerGroup(), promise:null};
+      entry.promise = schedule(async()=>{
+        const res=await fetch(trackPath(date,sat), {cache:'force-cache'});
+        if(!res.ok) throw new Error(`Track not found ${date} ${sat} (${res.status})`);
+        const js=await res.json();
+        const color=satColor(sat);
+
+        // accept shapes: {segments:[[lat,lon,ts]...]} or {lats,lons}
+        if (Array.isArray(js.segments)) {
+          for (const seg of js.segments) {
+            const latlngs = seg.map(p => [ +p[0], +p[1] ]);
+            const pl = L.polyline(latlngs, {renderer:canvasRenderer,weight:2,opacity:.9,color});
+            pl.bindTooltip(`${sat} ${date}`,{sticky:true});
+            entry.layer.addLayer(pl);
+          }
+        } else if (Array.isArray(js.lats) && Array.isArray(js.lons)) {
+          const n = Math.min(js.lats.length, js.lons.length);
+          const latlngs = [];
+          for (let i=0;i<n;i++) latlngs.push([ +js.lats[i], +js.lons[i] ]);
+          const pl = L.polyline(latlngs, {renderer:canvasRenderer,weight:2,opacity:.9,color});
+          pl.bindTooltip(`${sat} ${date}`,{sticky:true});
+          entry.layer.addLayer(pl);
+        }
+
+        entry.state='ready'; return entry;
+      }).catch(err=>{ entry.state='error'; entry.error=err; throw err; });
+      trackCache.set(key,entry); return entry.promise;
+    }
+    function clearAllTrackLayers(){ for(const entry of trackCache.values()){ try{ map.removeLayer(entry.layer);}catch(_){} } }
+    function addTrack(entry){ if(!entry||entry.state!=='ready')return; if(map.hasLayer(entry.layer))return; entry.layer.addTo(map); }
+    function rebuildTracksOnMap(){
+      const show=document.getElementById('chkShowTracks').checked;
+      clearAllTrackLayers();
+      if(!show || obsDates.length===0) return;
+
+      // use current user's selection
+      syncSelectedSatsFromUser();
+      if(selectedSats.size===0) return;
+
+      const promises=[];
+      for(const d of obsDates){ for(const sat of selectedSats){ promises.push(loadTrack(d,sat)); } }
+      Promise.allSettled(promises).then(()=>{
+        for(const d of obsDates){ for(const sat of selectedSats){ const e=trackCache.get(trackKey(d,sat)); if(e&&e.state==='ready') addTrack(e); } }
+      });
+    }
+    function buildSatelliteList(){
+      const box=document.getElementById('satList'); const hint=document.getElementById('satSourceHint');
+      box.innerHTML='';
+      if(!TRACK_INDEX){ hint.textContent='tracks/index.json not loaded.'; return; }
+      if(obsDates.length===0){ hint.textContent='Set observation window in Step 4.'; return; }
+      const set=new Set(); for(const d of obsDates){ (TRACK_INDEX[d]||[]).forEach(s=>set.add(s)); }
+      if(set.size===0){ hint.textContent='No tracks available for chosen observation window.'; return; }
+      hint.textContent='Select satellites to overlay ground tracks:';
+
+      const sats = Array.from(set).sort((a,b)=>a.localeCompare(b));
+      const userSet = getCurrentSatSet();
+
+      for(const s of sats){
+        const row=document.createElement('div'); row.className='sat-item';
+        const color=satColor(s);
+        row.innerHTML=`
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" class="sat-check" value="${s}"/>
+            <span class="sat-chip" style="border-color:${color};color:${color}">${s}</span>
+          </label>`;
+        box.appendChild(row);
+      }
+
+      // 回显与监听：写入当前用户集合，并同步全局 selectedSats 以兼容其它逻辑
+      syncSelectedSatsFromUser(); // 先把全局镜像成当前用户的
+      box.querySelectorAll('.sat-check').forEach(cb=>{
+        cb.checked = userSet.has(cb.value);
+        cb.addEventListener('change', e=>{
+          const name = e.target.value;
+          if (e.target.checked) {
+            userSet.add(name);
+            selectedSats.add(name);
+          } else {
+            userSet.delete(name);
+            selectedSats.delete(name);
+          }
+          rebuildTracksOnMap();
+        });
+      });
+    }
+
+    // =========================
+    // Exports (per-user satellites)
+    // =========================
+    function toCSV(rows){ const esc=s=>'"'+String(s).replace(/"/g,'""')+'"'; return rows.map(r=>r.map(esc).join(',')).join('\n'); }
+    function downloadCSV(filename, rows){ const blob=new Blob([toCSV(rows)],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); }
+    function exportCurrentUser(){
+      if(!currentUser){ alert('Please select a user.'); return; }
+      const rows=[['username','lat','lon','fire_count','frequency_hours']];
+      for(const p of (users[currentUser]||[])) rows.push([currentUser,p.lat,p.lon,p.fire_count,p.frequency??'' ]);
+      downloadCSV(`${currentUser}_selected_raw_points.csv`, rows);
+    }
+    function exportAllUsers() {
+      if (obsDates.length === 0) {
+        alert('Please set the observation window in Step 4.');
+        return;
+      }
+      const start = obsDates[0] + ' 00:00:00Z';
+      const end   = obsDates[obsDates.length - 1] + ' 23:59:59Z';
+      const defInt = Math.max(1, Math.floor(+document.getElementById('defaultInterval').value || 4));
+
+      const rows = [[
+        'user','window_start_utc','window_end_utc','satellites','point_id','lat','lon','required_interval_hours'
+      ]];
+
+      let count = 0;
+      for (const [uname, arr] of Object.entries(users)) {
+        const satStr = [...(satellitesByUser[uname] || new Set())].join(';'); // 每用户自己的
+        for (const p of arr) {
+          const req = (p.frequency == null || p.frequency === '') ? defInt : p.frequency;
+          rows.push([uname, start, end, satStr, p.id, p.lat, p.lon, req]);
+          count++;
+        }
+      }
+      if (count === 0) { alert('No points selected for any user.'); return; }
+      const fname = `task_request_ALL_${obsDates[0]}_${obsDates[obsDates.length-1]}.csv`;
+      downloadCSV(fname, rows);
+      const statusEl = document.getElementById('exportStatus');
+      if (statusEl) statusEl.textContent = `Exported ${count} task rows across ${Object.keys(users).length} user(s).`;
+    }
+    function exportTaskCSV(){
+      if(!currentUser){ alert('Please select a user.'); return; }
+      if((users[currentUser]||[]).length===0){ alert('No points for current user.'); return; }
+      if(obsDates.length===0){ alert('Set observation window in Step 4.'); return; }
+      const start=obsDates[0] + ' 00:00:00Z';
+      const end=obsDates[obsDates.length-1] + ' 23:59:59Z';
+      const satStr=[...getCurrentSatSet()].join(';'); // 当前用户
+      const def=Math.max(1,Math.floor(+document.getElementById('defaultInterval').value||4));
+      const rows=[[ 'user','window_start_utc','window_end_utc','satellites','point_id','lat','lon','required_interval_hours' ]];
+      for(const p of (users[currentUser]||[])){ const req=(p.frequency==null||p.frequency==='')?def:p.frequency; rows.push([ currentUser,start,end,satStr,p.id,p.lat,p.lon,req ]); }
+      downloadCSV(`task_request_${currentUser||'user'}_${obsDates[0]}_${obsDates[obsDates.length-1]}.csv`, rows);
+    }
+
+    // =========================
+    // Done modal
+    // =========================
+    function showDone(){ document.getElementById('doneOverlay').classList.remove('hidden'); document.getElementById('doneDialog').classList.remove('hidden'); }
+    function hideDone(){ document.getElementById('doneOverlay').classList.add('hidden'); document.getElementById('doneDialog').classList.add('hidden'); }
+    function tryExit(){
+      window.close();
+      setTimeout(()=>{
+        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font:16px system-ui;">You can close this tab now.</div>';
+      }, 300);
+    }
+
+    // =========================
+    // Wizard nav
+    // =========================
+    function onPrev(){ if(wizardStep>1){ setStep(wizardStep-1); } }
+    function onNext(){
+      if(wizardStep===1){
+        if(!currentUser){ alert('Please create or select a user.'); return; }
+        setStep(2);
+      }else if(wizardStep===2){
+        if(dataDates.length===0){ alert('Please load the data window.'); return; }
+        setStep(3);
+      }else if(wizardStep===3){
+        if((users[currentUser]||[]).length===0){ alert('Please select at least one point.'); return; }
+        setStep(4);
+      }else if(wizardStep===4){
+        const s=document.getElementById('obsStart').value;
+        const e=document.getElementById('obsEnd').value;
+        if(!s||!e||e<s){ alert('Please set a valid observation window.'); return; }
+        obsDates.length=0; listDays(s,e).forEach(d=>obsDates.push(d));
+        document.getElementById('satDates').textContent=`Observation window: ${s} → ${e}`;
+        // 切到卫星步骤时，同步当前用户 -> 全局，并刷新 UI
+        syncSelectedSatsFromUser();
+        buildSatelliteList();
+        rebuildTracksOnMap();
+        setStep(5);
+      }else if(wizardStep===5){
+        showDone();
+      }
+    }
+
+    // =========================
+    // Wiring
+    // =========================
+    document.getElementById('btnEnter').addEventListener('click',()=>{ document.getElementById('cover').classList.add('hidden'); });
+
+    function refreshUserDropdown(){
+      const sel=document.getElementById('userSelect'); const prev=sel.value; sel.innerHTML='';
+      Object.keys(users).forEach(u=>{ const opt=document.createElement('option'); opt.value=u; opt.textContent=u; sel.appendChild(opt); });
+      if(users[prev]) sel.value=prev;
+      if(!sel.value && Object.keys(users).length) sel.value=Object.keys(users)[0];
+      currentUser=sel.value||null;
+
+      // 切换用户：同步该用户的卫星 -> 全局；刷新复选框与轨迹
+      syncSelectedSatsFromUser();
+      buildSatelliteList();
+      rebuildTracksOnMap();
+
+      refreshSelectedList(); updateWizardButtons();
+      // 重绘当前用户样式
+      for(const [,cache] of tileCache.entries()){ for(const [,entry] of cache.entries()){ if(entry.added) restyleTileMarkers(entry); } }
+    }
+
+    document.getElementById('btnAddUser').addEventListener('click',()=>{
+      const name=(document.getElementById('newUserName').value||'').trim();
+      const sel=document.getElementById('userSelect');
+      if(name){
+        if(!users[name]) users[name]=[];
+        if(!satellitesByUser[name]) satellitesByUser[name] = new Set(); // 初始化该用户的卫星集合
+        sel.value=name; currentUser=name; document.getElementById('newUserName').value='';
+        refreshUserDropdown();
+      }else{
+        currentUser=sel.value||null;
+        refreshUserDropdown();
+      }
+    });
+
+    document.getElementById('userSelect').addEventListener('change',e=>{
+      currentUser=e.target.value||null;
+      refreshUserDropdown();
+    });
+
+    document.getElementById('btnLoadTiles').addEventListener('click', async ()=>{
+      const s=document.getElementById('dataStart').value;
+      const e=document.getElementById('dataEnd').value;
+      if(!s||!e||e<s){ alert('Choose a valid data window.'); return; }
+      const all=Object.keys(INDEX||{}).sort();
+      if(!all.includes(s) || !all.includes(e)){ alert('Selected dates must be within available data window.'); return; }
+      dataDates.length=0; listDays(s,e).forEach(d=>{ if(INDEX[d]) dataDates.push(d); });
+      clearAllTiles();
+      document.getElementById('sideStatus').textContent='Loading tiles...';
+      const b=L.latLngBounds([META.lat_min, META.lon_min],[META.lat_max, META.lon_max]); map.fitBounds(b.pad(0.1));
+      await dataMoveHandler(); updateWizardButtons();
+    });
+
+    document.getElementById('btnRectSelect').addEventListener('click',()=>{
+      if(!currentUser){ alert('Please add/select a user first.'); return; }
+      enableRectangleSelection();
+    });
+    document.getElementById('btnSetAll12').addEventListener('click',()=>{ if(!currentUser) return; (users[currentUser]||[]).forEach(p=>p.frequency=12); refreshSelectedList(); });
+    document.getElementById('btnExportUser').addEventListener('click',exportCurrentUser);
+    document.getElementById('btnExportAll').addEventListener('click',exportAllUsers);
+    document.getElementById('btnRemoveSelected').addEventListener('click',removeSelectedRows);
+    document.getElementById('btnClearAll').addEventListener('click',clearAllRows);
+    document.getElementById('checkAllRows').addEventListener('change',e=>{
+      const checked=e.target.checked; document.querySelectorAll('#selected-tbody .row-check').forEach(cb=>cb.checked=checked);
+    });
+    document.getElementById('btnAddCustom').addEventListener('click',()=>{
+      if(!currentUser){ alert('Please add/select a user first.'); return; }
+      const lat=parseFloat(document.getElementById('customLat').value);
+      const lon=parseFloat(document.getElementById('customLon').value);
+      if(!Number.isFinite(lat)||!Number.isFinite(lon)){ alert('Please input valid lat/lon.'); return; }
+      ensureUser(currentUser);
+      const id=`custom|${lat}|${lon}|${Math.random().toString(36).slice(2,8)}`;
+      if((users[currentUser]||[]).findIndex(p=>p.id===id)===-1){
+        users[currentUser].push({id,lat,lon,fire_count:1,frequency:null});
+        refreshSelectedList();
+      }
+    });
+
+    document.getElementById('chkShowTracks').addEventListener('change',rebuildTracksOnMap);
+    document.getElementById('btnClearSats').addEventListener('click',()=>{
+      const set = getCurrentSatSet();
+      set.clear();
+      selectedSats.clear(); // 同步清空
+      document.querySelectorAll('#satList .sat-check').forEach(cb=>cb.checked=false);
+      rebuildTracksOnMap();
+    });
+    document.getElementById('btnExportTaskCSV').addEventListener('click',exportTaskCSV);
+
+    document.getElementById('doneOverlay').addEventListener('click', hideDone);
+    document.getElementById('btnDoneAddUser').addEventListener('click', ()=>{ hideDone(); setStep(1); document.getElementById('newUserName').focus(); });
+    document.getElementById('btnDoneExportAll').addEventListener('click', ()=>{ exportAllUsers(); hideDone(); });
+    document.getElementById('btnExit').addEventListener('click', tryExit);
+
+    document.getElementById('btnPrev').addEventListener('click',onPrev);
+    document.getElementById('btnNext').addEventListener('click',onNext);
+
+    map.on('moveend', dataMoveHandler);
+    map.on('zoomend', dataMoveHandler);
+
+    // Boot
+    (async function boot(){
+      // Tiles meta/index
+      try{
+        const [m,i]=await Promise.all([
+          fetch(`${TILE_DIR}/meta.json`,{cache:'no-cache'}).then(r=>r.json()),
+          fetch(`${TILE_DIR}/index.json`,{cache:'no-cache'}).then(r=>r.json())
+        ]);
+        META=m; INDEX=i;
+        const days=Object.keys(INDEX).sort();
+        TILE_MIN_DATE=days[0]; TILE_MAX_DATE=days[days.length-1];
+        const hint=document.getElementById('tileDateHint');
+        hint.textContent=`Data window available: ${TILE_MIN_DATE} → ${TILE_MAX_DATE} (inclusive)`;
+        const ds=document.getElementById('dataStart'), de=document.getElementById('dataEnd');
+        ds.min=TILE_MIN_DATE; ds.max=TILE_MAX_DATE; de.min=TILE_MIN_DATE; de.max=TILE_MAX_DATE;
+        ds.value=TILE_MIN_DATE; de.value=TILE_MAX_DATE;
+        document.getElementById('btnLoadTiles').disabled=false;
+        document.getElementById('sideStatus').textContent=`Grid nx=${META.nx}, ny=${META.ny}`;
+        const b=L.latLngBounds([META.lat_min, META.lon_min],[META.lat_max, META.lon_max]); map.fitBounds(b.pad(0.1));
+      }catch(e){
+        document.getElementById('tileDateHint').textContent='Failed to load tiles meta/index.'; console.error(e);
+      }
+
+      // Tracks index
+      try{
+        const t=await fetch(`${TRACK_DIR}/index.json`,{cache:'no-cache'});
+        if(t.ok){ TRACK_INDEX=await t.json(); document.getElementById('satSourceHint').textContent='Tracks index loaded.'; }
+        else{ document.getElementById('satSourceHint').textContent='tracks/index.json not found.'; }
+      }catch(e){
+        document.getElementById('satSourceHint').textContent='tracks/index.json not found.'; console.warn('Tracks index load failed',e);
+      }
+
+      users['User1']=[]; satellitesByUser['User1']=new Set(); currentUser='User1';
+      refreshUserDropdown();
+
+      // default observation window
+      const s=document.getElementById('obsStart'), e=document.getElementById('obsEnd');
+      s.value=OBS_DEFAULT_START; e.value=OBS_DEFAULT_END;
+      document.getElementById('obsHint').textContent = `Observation window (example): ${OBS_DEFAULT_START} → ${OBS_DEFAULT_END}. You can change anytime.`;
+
+      setStep(1);
+    })();
+  </script>
+</body>
+</html>
