@@ -1,0 +1,102 @@
+{
+  "Global-19": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "Global-18": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "Global-17": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "SKYSAT-C13": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "SKYSAT-C11": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "TERRA SAR X": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "ICEYE-X13": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "FLOCK 4Q-34": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "Landsat-8": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  },
+  "SENTINEL-1A": {
+    "swath_km": 80.0,
+    "max_off_nadir_deg": 30.0,
+    "access_km_per_deg": 30.0,
+    "min_elevation_deg": 0,
+    "slew_rate_deg_s": 1.0,
+    "settle_time_s": 8,
+    "max_imaging_s_per_orbit": 900,
+    "quality_penalty_per_deg": 0.01
+  }
+}

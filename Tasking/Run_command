@@ -1,0 +1,19 @@
+# 0) 可选：创建虚拟环境（推荐）
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install --upgrade pip
+pip install pandas numpy skyfield sgp4
+
+# 1) 由 TLE 生成卫星能力骨架（sat_capabilities.json）
+python make_sat_caps_from_tle.py \
+  --tle satellites_10.tle \
+  --out sat_capabilities.json
+
+# 2) 生成候选观测（读取固定的 test.csv / sat_capabilities.json / satellites_10.tle）
+python generate_candidates.py
+
+# 3) 贪心排程（读取 candidates.csv + test.csv）
+python plan_greedy.py
+
+# 4) 导出“单行堆叠版”覆盖汇总
+python analysis.py
