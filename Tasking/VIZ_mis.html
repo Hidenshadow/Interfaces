@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Tasking Visualization — Resizable Timelines (Per-User Palette Colors)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Papa Parse -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <style>
+    :root{
+      --brand:#1e6bd6;
+      --brand-weak:#64b5f6;
+      --ok:#1565c0;
+      --mute:#6b7280;
+      --bg:#f6f7fb;
+      --card:#ffffff;
+      --border:#e5e7eb;
+      --text:#0f172a;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;color:var(--text);background:#fff}
+
+    header{
+      position:sticky;top:0;z-index:1000;
+      display:flex;align-items:center;justify-content:space-between;
+      padding:10px 14px;background:var(--brand);color:#fff
+    }
+    header .title{font-weight:700}
+    header .sub{opacity:.9;font-size:12px}
+
+    #alert{
+      display:none; padding:10px 14px; background:#fff3cd; color:#7a5a00;
+      border-bottom:1px solid #ffe69c; font-size:13px
+    }
+
+    /* Layout */
+    #main{display:flex; flex-direction:column; height:calc(100vh - 48px);}
+    #upper{
+      display:grid; grid-template-columns:1fr 360px;
+      min-height:300px;
+      height:64%;
+      border-bottom:1px solid var(--border);
+    }
+    #map{height:100%;width:100%}
+    aside{border-left:1px solid var(--border);background:var(--bg);overflow:auto;min-width:320px}
+
+    /* Splitter (draggable) */
+    #splitter{
+      height:8px;
+      background:
+        repeating-linear-gradient(90deg, #d1d5db 0 8px, #e5e7eb 8px 16px);
+      border-top:1px solid var(--border);
+      border-bottom:1px solid var(--border);
+      cursor:row-resize;
+      position:relative;
+    }
+    #splitter:after{
+      content:"";
+      position:absolute;left:50%;top:50%;
+      width:48px;height:3px;border-radius:3px;
+      transform:translate(-50%,-50%);
+      background:#9ca3af;
+      opacity:.6;
+    }
+
+    /* Panels */
+    .panel{background:var(--card);border-bottom:1px solid var(--border);padding:12px 12px}
+    .panel h3{margin:0 0 8px;font-size:15px}
+    .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .row>*{flex:0 0 auto}
+    .muted{color:var(--mute);font-size:12px}
+    .btn{padding:7px 10px;border:0;border-radius:8px;background:var(--brand);color:#fff;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .btn.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+    .badge{display:inline-block;background:var(--brand-weak);color:#0b2540;padding:3px 6px;border-radius:6px;font-size:12px}
+    .input, select{padding:7px 8px;border:1px solid var(--border);border-radius:8px;background:#fff}
+    .kpi{display:flex;gap:10px;flex-wrap:wrap}
+    .kpi .card{background:#fff;border:1px solid var(--border);border-radius:10px;padding:8px 10px;min-width:120px}
+    .kpi .label{font-size:11px;color:var(--mute)}
+    .kpi .val{font-size:16px;font-weight:700}
+    .legend{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .dot{width:10px;height:10px;border-radius:50%}
+    .dot.plan{background:var(--ok)}
+    .dot.noplan{background:#cbd5e1}
+    .hint{color:var(--mute);font-size:12px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+    /* Bottom timelines (resizable target) */
+    #bottom{
+      height:36%;
+      min-height:120px;
+      display:flex; flex-direction:column;
+    }
+    #bottom.collapsed{height:44px !important; min-height:44px !important;}
+    #bottomHeader{display:flex; align-items:center; gap:10px; justify-content:space-between; border-top:1px solid var(--border); background:#fff;}
+    #bottomHeader .left{display:flex; align-items:center; gap:10px;}
+    #toggleBottom{padding:5px 10px; border-radius:999px; font-size:12px;}
+    #bottomBody{flex:1 1 auto; overflow:auto; background:#fff; border-top:1px solid var(--border);}
+
+    .ug{border-bottom:1px solid var(--border)}
+    .ug-head{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; cursor:pointer; background:#fafafa}
+    .ug-head:hover{background:#f3f4f6}
+    .ug-title{display:flex; align-items:center; gap:10px}
+    .ug-actions .chip{font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:999px; cursor:pointer; background:#fff}
+    .ug-body{display:none; padding:6px 12px 10px}
+    .ug.open .ug-body{display:block}
+
+    .tl-item{padding:8px 6px; border-bottom:1px dashed #eef1f4; cursor:pointer}
+    .tl-item:hover{background:#f9fafb}
+    .tl-hdr{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px; font-size:12px}
+
+    /* Timeline SVG (compact) */
+    .tl-wrap { margin-top:2px; }
+    .tl-svg { width:100%; height:auto; display:block; }
+    .tl-axis { font-size:9.5px; fill:#6b7280 }
+    .tl-tick { stroke:#dbe2ea; stroke-width:1 }
+    .tl-base { stroke:#9fb4c9; stroke-width:1.8 }
+    .tl-dot { stroke:#fff; stroke-width:1.2; cursor:pointer }
+    .tl-legend { display:flex; flex-wrap:wrap; gap:8px; margin-top:2px; font-size:10.5px; color:var(--mute); }
+    .tl-chip { display:inline-flex; align-items:center; gap:6px; }
+    .tl-chip i { display:inline-block; width:9px; height:9px; border-radius:50%; }
+
+    @media (max-width:1100px){
+      #upper{grid-template-columns:1fr;grid-template-rows:340px 1fr}
+      aside{border-left:0;border-top:1px solid var(--border)}
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="title">Tasking Visualization</div>
+  <div class="sub">Loads <b>test.csv</b> + <b>plan_mis.csv</b> (or <b>coverage_summary_minimal.csv</b>)</div>
+</header>
+<div id="alert"></div>
+
+<div id="main">
+  <!-- Upper: map + compact sidebar -->
+  <div id="upper">
+    <div id="map"></div>
+    <aside>
+      <div class="panel">
+        <h3>Filters</h3>
+        <div class="row" style="margin-bottom:8px">
+          <label>User
+            <select id="fUser"></select>
+          </label>
+          <label>Satellite
+            <select id="fSat"></select>
+          </label>
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <label>Start <input class="input" type="datetime-local" id="fStart"></label>
+          <label>End <input class="input" type="datetime-local" id="fEnd"></label>
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <input class="input" id="fSearch" placeholder="Search point_id..."/>
+          <button class="btn" id="btnApply">Apply</button>
+          <button class="btn ghost" id="btnReset">Reset</button>
+          <button class="btn ghost" id="btnExport">Export filtered CSV</button>
+        </div>
+        <div class="legend">
+          <span class="dot plan"></span> planned
+          <span class="dot noplan"></span> no plan
+          <span class="hint">Markers reflect plan availability</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>KPIs</h3>
+        <div class="kpi">
+          <div class="card">
+            <div class="label">Points (filtered)</div>
+            <div class="val" id="kPoints">-</div>
+          </div>
+          <div class="card">
+            <div class="label">Total observations</div>
+            <div class="val" id="kObs">-</div>
+          </div>
+          <div class="card">
+            <div class="label">Avg / Max gap (h)</div>
+            <div class="val"><span id="kAvg">-</span> / <span id="kMax">-</span></div>
+          </div>
+          <div class="card">
+            <div class="label">Coverage (%)</div>
+            <div class="val" id="kCov">-</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- User color legend -->
+      <div class="panel" id="userLegendPanel">
+        <h3>User colors (filtered)</h3>
+        <div id="userLegend" class="legend"></div>
+      </div>
+
+      <!-- Per-user KPIs (filtered) -->
+      <div class="panel">
+        <h3>Per-user KPIs (filtered)</h3>
+        <div class="muted">Calculated on the current filtered set.</div>
+        <table style="margin-top:6px">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Points</th>
+              <th>Total obs</th>
+              <th>Avg gap (h)</th>
+              <th>Max gap (h)</th>
+              <th>Coverage (%)</th>
+            </tr>
+          </thead>
+          <tbody id="kpiUserTbody"></tbody>
+        </table>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Draggable splitter -->
+  <div id="splitter" title="Drag to resize (double-click to collapse/expand)"></div>
+
+  <!-- Bottom: collapsible timelines grouped by user -->
+  <div id="bottom" class="collapsed">
+    <div class="panel" id="bottomHeader">
+      <div class="left">
+        <button id="toggleBottom" class="btn ghost">Show timelines</button>
+        <span class="muted">Compact timelines by user • click a row to focus map</span>
+      </div>
+      <div id="btStats" class="muted"></div>
+    </div>
+    <div id="bottomBody"></div>
+  </div>
+</div>
+
+<script>
+/* =========================
+   Config
+   ========================= */
+const PATH_TASKS = 'test.csv';
+const PATH_PLAN_DETAIL = 'plan_mis.csv';
+const PATH_PLAN_SUMMARY = 'coverage_summary_minimal.csv';
+
+/* =========================
+   Globals
+   ========================= */
+let map, canvasRenderer;
+let tasks = [];
+let points = [];
+let filteredPoints = [];
+let markers = new Map();
+let planType = null;
+
+/* splitter state */
+let isDragging = false;
+let dragStartY = 0;
+let startBottomH = 0;
+let savedBottomH = 260;
+const MIN_BOTTOM = 120;
+const MIN_UPPER  = 280;
+
+/* =========================
+   Helpers
+   ========================= */
+function showAlert(msg){ const el=document.getElementById('alert'); el.textContent=msg; el.style.display='block'; }
+function hideAlert(){ document.getElementById('alert').style.display='none'; }
+
+async function parseCSV(url){
+  let href; try{ href=new URL(url,window.location.href).href; }catch(e){ throw new Error(`Invalid CSV path: ${url}`); }
+  try{
+    const r=await fetch(href,{cache:'no-cache'}); if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const t=await r.text();
+    return new Promise((resolve,reject)=>Papa.parse(t,{header:true,worker:false,skipEmptyLines:true,complete:x=>resolve(x.data||[]),error:reject}));
+  }catch(_){
+    return new Promise((resolve,reject)=>Papa.parse(href,{download:true,header:true,worker:false,skipEmptyLines:true,complete:x=>resolve(x.data||[]),error:reject}));
+  }
+}
+function toUTCDate(s){
+  if(s==null) return null; let t=String(s).trim(); if(!t) return null;
+  if(/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}Z$/.test(t)) t=t.replace(' ','T');
+  if(/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}$/.test(t)) t=t.replace(' ','T')+':00Z';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(t)) t=t+'T00:00:00Z';
+  if(/^\d{4}-\d{2}-\d{2}T/.test(t) && !/[Zz]|[+\-]\d{2}:\d{2}$/.test(t)) t=t+'Z';
+  const d=new Date(t); return isNaN(d.getTime())?null:d;
+}
+function fmtUTC(d){ return d ? d.toISOString().replace('.000','').replace('T',' ').replace('Z','Z') : ''; }
+function keyOf(u,p){ return `${u}||${p}`; }
+function pick(row,aliases){ for(const k of aliases){ if(row[k]!=null && String(row[k]).trim()!=='') return row[k]; } return null; }
+function downloadCSV(filename, rows){
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
+}
+function colorForSat(name){
+  const s=String(name||'UNKNOWN'); let h=0; for(let i=0;i<s.length;i++) h=(h*131+s.charCodeAt(i))>>>0;
+  return `hsl(${h%360},70%,50%)`;
+}
+
+/* === NEW: user normalization + palette hash color === */
+// Normalize user name: trim and lower for stable hashing
+function normalizeUser(u){
+  return (u == null ? '' : String(u)).trim().toLowerCase();
+}
+// Simple 32-bit hash (djb2-like)
+function hash32(str){
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) + str.charCodeAt(i);
+  return (h >>> 0);
+}
+// Distinct categorical palette (high-contrast)
+const USER_PALETTE = [
+  '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b',
+  '#e377c2','#7f7f7f','#bcbd22','#17becf',
+  '#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00',
+  '#ffff33','#a65628','#f781bf','#999999'
+];
+// Deterministic, vivid per-user color using palette + hash
+function colorForUser(name){
+  const key = normalizeUser(name) || 'unknown';
+  const idx = hash32(key) % USER_PALETTE.length;
+  return USER_PALETTE[idx];
+}
+
+/* --- timeline SVG --- */
+function buildTimelineSVG(pt, width=860, height=64){
+  const padL=36,padR=12,padT=8,padB=16; const plotW=Math.max(40,width-padL-padR); const y=padT+(height-padT-padB)/2;
+  const t0=+pt.window_start_utc, t1=+pt.window_end_utc; if(!isFinite(t0)||!isFinite(t1)||t1<=t0) return '';
+  const x=(t)=> padL + ((t-t0)/(t1-t0))*plotW;
+
+  const ticks=[]; const d0=new Date(pt.window_start_utc.toISOString().slice(0,10)+'T00:00:00Z');
+  const d1=new Date(pt.window_end_utc.toISOString().slice(0,10)+'T00:00:00Z');
+  for(let d=new Date(d0); d<=d1; d=new Date(d.getTime()+86400000)){
+    const tx=Math.min(Math.max(x(+d),padL),padL+plotW); ticks.push({x:tx,label:d.toISOString().slice(5,10)});
+  }
+
+  const obs=(pt.timesSat&&pt.timesSat.length)? pt.timesSat.map(([dd,s])=>({t:+dd,sat:s})) : (pt.times||[]).map(dd=>({t:+dd,sat:'UNKNOWN'}));
+  const dots=obs.filter(o=>o.t>=t0&&o.t<=t1).map(o=>{
+    const cx=x(o.t), fill=colorForSat(o.sat); // 若想按用户上色，改为 colorForUser(pt.user)
+    const label=`${(new Date(o.t)).toISOString().replace('.000','').replace('T',' ').replace('Z','Z')} @ ${o.sat}`;
+    return `<circle class="tl-dot" cx="${cx.toFixed(1)}" cy="${y}" r="4.5" fill="${fill}"><title>${label}</title></circle>`;
+  }).join('');
+
+  const satSet=new Set(obs.map(o=>o.sat));
+  const legend=[...satSet].sort().map(s=>`<span class="tl-chip"><i style="background:${colorForSat(s)}"></i>${s}</span>`).join('');
+
+  const ticksSvg=ticks.map(tk=>`
+    <line class="tl-tick" x1="${tk.x}" y1="${y-10}" x2="${tk.x}" y2="${y+10}"></line>
+    <text class="tl-axis" x="${tk.x}" y="${y+20}" text-anchor="middle">${tk.label}</text>`).join('');
+
+  return `
+    <div class="tl-wrap">
+      <svg class="tl-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMinYMid meet">
+        <line class="tl-base" x1="${padL}" y1="${y}" x2="${padL+plotW}" y2="${y}"></line>
+        ${ticksSvg}
+        ${dots}
+        <text class="tl-axis" x="${padL}" y="${y-12}" text-anchor="start">${pt.window_start_utc.toISOString().slice(0,19)}Z</text>
+        <text class="tl-axis" x="${padL+plotW}" y="${y-12}" text-anchor="end">${pt.window_end_utc.toISOString().slice(0,19)}Z</text>
+      </svg>
+      <div class="tl-legend">${legend}</div>
+    </div>`;
+}
+
+/* --- popup with stats + timeline --- */
+function popupHTML(pt){
+  const timesHTML = (pt.timesSat && pt.timesSat.length)
+    ? pt.timesSat.map(([d,s])=>`<code class="mono">${fmtUTC(d)} @ ${s}</code>`).join('<br/>')
+    : (pt.times.length ? pt.times.map(d=>`<code class="mono">${fmtUTC(d)}</code>`).join('<br/>') : '<span class="muted">No observations</span>');
+
+  const gapAvg = pt.avg_observation_gap_h!=null ? pt.avg_observation_gap_h.toFixed(2) : '-';
+  const gapMax = pt.max_observation_gap_h!=null ? pt.max_observation_gap_h.toFixed(2) : '-';
+
+  const timelineBlock = buildTimelineSVG(pt, 440, 76);
+
+  return `
+    <div style="min-width:300px; max-width:520px">
+      <div><b>User</b>: ${pt.user}</div>
+      <div><b>Point</b>: ${pt.point_id}</div>
+      <div><b>Window</b>: <span class="mono">${fmtUTC(pt.window_start_utc)}</span> — <span class="mono">${fmtUTC(pt.window_end_utc)}</span></div>
+      <div><b>Required interval</b>: ${pt.required_interval_hours} h</div>
+      <div><b>Satellites</b>: ${pt.satellites_used || '<span class="muted">Unknown</span>'}</div>
+      <div><b>Obs count</b>: ${pt.observation_count}</div>
+      <div><b>Avg/Max gap (h)</b>: ${gapAvg} / ${gapMax}</div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:8px 0"/>
+      <div><b>Observation times (UTC)</b></div>
+      <div class="times">${timesHTML}</div>
+      ${timelineBlock}
+    </div>`;
+}
+
+/* =========================
+   Data loading & merge
+   ========================= */
+async function loadAll(){
+  if (location.protocol==='file:') showAlert('Open via a local server (e.g., python -m http.server).');
+
+  // tasks
+  const rawTasks=await parseCSV(PATH_TASKS);
+  tasks=rawTasks.map(r=>{
+    const user = normalizeUser(pick(r,['user','username','User'])); // normalized for color/group
+    const point_id=pick(r,['point_id','point','id','pointId','PointID']);
+    const lat=parseFloat(pick(r,['lat','latitude','lat_center','Lat','Latitude']));
+    const lon=parseFloat(pick(r,['lon','longitude','lon_center','Lon','Longitude']));
+    const wstart=toUTCDate(pick(r,['window_start_utc','start','window_start','WindowStartUTC']));
+    const wend=toUTCDate(pick(r,['window_end_utc','end','window_end','WindowEndUTC']));
+    const interval=parseFloat(pick(r,['required_interval_hours','frequency_hours','interval_hours']));
+    const sats=(pick(r,['satellites','satellite','satellites_used','Satellites'])||'').trim();
+    return {user,point_id,lat,lon,window_start_utc:wstart,window_end_utc:wend,required_interval_hours:interval,satellites_req:sats};
+  }).filter(t=>t.user&&t.point_id&&isFinite(t.lat)&&isFinite(t.lon)&&t.window_start_utc&&t.window_end_utc&&isFinite(t.required_interval_hours));
+
+  // plan
+  let planRows=[]; try{ planRows=await parseCSV(PATH_PLAN_DETAIL); if(!planRows.length) throw 0; planType='detail'; }
+  catch(_){ planRows=await parseCSV(PATH_PLAN_SUMMARY); planType='summary'; }
+
+  const planByKey=new Map();
+  if (planType==='detail'){
+    for(const r of planRows){
+      const user = normalizeUser(pick(r,['user','User'])); const pid=pick(r,['point_id','point','PointID','id']); if(!user||!pid) continue;
+      const tmid=toUTCDate(pick(r,['t_mid','t_mid_utc','tmid'])); if(!tmid) continue;
+      const sat=(pick(r,['satellite','sat','sat_name'])||'').trim()||'UNKNOWN';
+      const ent=planByKey.get(keyOf(user,pid))||{times:[],timesSat:[],sats:new Set()};
+      ent.times.push(tmid); ent.timesSat.push([tmid,sat]); ent.sats.add(sat);
+      planByKey.set(keyOf(user,pid),ent);
+    }
+  }else{
+    for(const r of planRows){
+      const user = normalizeUser(pick(r,['user','User'])); const pid=pick(r,['point_id','point','PointID','id']); if(!user||!pid) continue;
+      const key=keyOf(user,pid); const ent=planByKey.get(key)||{times:[],timesSat:[],sats:new Set()};
+      const timesStr=pick(r,['observation_times_utc','times'])||'';
+      timesStr && timesStr.split('|').map(s=>toUTCDate(s.trim())).filter(Boolean).forEach(d=>ent.times.push(d));
+      const tsatStr=pick(r,['observation_times_sat_utc','times_sat'])||'';
+      tsatStr && tsatStr.split('|').map(x=>x.trim()).filter(Boolean).forEach(tok=>{
+        const [tp,sp]=tok.split('@'); const d=toUTCDate((tp||'').trim()); const s=((sp||'').trim())||'UNKNOWN';
+        if(d){ ent.timesSat.push([d,s]); ent.sats.add(s); }
+      });
+      const satsStr=pick(r,['satellites_used','satellites'])||'';
+      satsStr && satsStr.split(';').map(s=>s.trim()).filter(Boolean).forEach(s=>ent.sats.add(s));
+      planByKey.set(key,ent);
+    }
+  }
+  for(const e of planByKey.values()){ e.times.sort((a,b)=>a-b); e.timesSat.sort((a,b)=>a[0]-b[0]); }
+
+  // merge + gaps
+  points=tasks.map(t=>{
+    const e=planByKey.get(keyOf(t.user,t.point_id));
+    const times=e?e.times:[];
+    const timesSat=e?e.timesSat:[];
+    let avg=null,max=null;
+    if(times.length>=2){ const gaps=[]; for(let i=1;i<times.length;i++) gaps.push((times[i]-times[i-1])/3600000); avg=gaps.reduce((a,b)=>a+b,0)/gaps.length; max=Math.max(...gaps); }
+    return {...t, observation_count:times.length, satellites_used:e?[...e.sats].sort().join(';'):'', times, timesSat,
+            avg_observation_gap_h:avg, max_observation_gap_h:max};
+  });
+  hideAlert();
+}
+
+/* =========================
+   Map & markers
+   ========================= */
+function initMap(){
+  canvasRenderer=L.canvas({padding:0.2});
+  map=L.map('map',{preferCanvas:true}).setView([-25.5,135],4);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap & CARTO'}).addTo(map);
+}
+// Per-user color; keep plan/no-plan via opacity/weight
+function markerStyle(user, hasPlan){
+  const c = colorForUser(user);
+  return {
+    renderer: canvasRenderer,
+    radius: 7,
+    color: c,                         // stroke uses user color
+    weight: hasPlan ? 2 : 1,
+    fillColor: c,                     // fill uses user color
+    fillOpacity: hasPlan ? 0.9 : 0.35 // no-plan appears lighter
+  };
+}
+function ensureMarker(pt){
+  const key=keyOf(pt.user,pt.point_id); if(markers.has(key)) return markers.get(key);
+  const m=L.circleMarker([pt.lat,pt.lon], markerStyle(pt.user, pt.observation_count>0))
+           .bindPopup(()=>popupHTML(pt)).addTo(map);
+  markers.set(key,m); return m;
+}
+function renderMarkers(list){
+  for (const m of markers.values()) { try { map.removeLayer(m); } catch (_) {} }
+  markers.clear();
+  if (!Array.isArray(list) || list.length === 0) return;
+  const sorted=list.slice().sort((a,b)=> {
+    const u=String(a.user).localeCompare(String(b.user));
+    return u!==0?u:String(a.point_id).localeCompare(String(b.point_id));
+  });
+  const bounds=[];
+  for(const p of sorted){ const m=ensureMarker(p); m.addTo(map); bounds.push([p.lat,p.lon]); }
+  try{ if(bounds.length){ map.fitBounds(L.latLngBounds(bounds).pad(0.15)); } }catch(_){}
+}
+
+/* =========================
+   Coverage helpers
+   ========================= */
+function generateSlots(wsMs, weMs, intervalH){
+  if(!isFinite(wsMs)||!isFinite(weMs)||!isFinite(intervalH)||intervalH<=0||weMs<=wsMs) return [];
+  const step = intervalH * 3600e3;
+  const mid0 = wsMs + step/2;
+  const slots=[];
+  for(let t=mid0; t<=weMs; t+=step) slots.push(t);
+  return slots;
+}
+function coverageForPoint(pt){
+  const ws = pt.window_start_utc?.getTime?.(); const we = pt.window_end_utc?.getTime?.(); const iv = +pt.required_interval_hours;
+  if(!isFinite(ws)||!isFinite(we)||!isFinite(iv)||iv<=0) return {covered:0,total:0};
+  const slots = generateSlots(ws,we,iv);
+  const tol = 0.5 * iv * 3600e3;
+  const times = (pt.times||[]).map(d=>d.getTime());
+  let covered=0, i=0;
+  for(const s of slots){
+    while(i<times.length && times[i] < s - tol) i++;
+    const hit = (i<times.length) && (Math.abs(times[i]-s) <= tol);
+    if(hit) covered++;
+  }
+  return {covered,total:slots.length};
+}
+
+/* =========================
+   Filters & KPIs
+   ========================= */
+function fillFilterOptions(){
+  const users=[...new Set(points.map(p=>p.user))].sort();
+  document.getElementById('fUser').innerHTML='<option value="">All users</option>'+users.map(u=>`<option value="${u}">${u}</option>`).join('');
+  const satSet=new Set(); points.forEach(p=>(p.satellites_used||'').split(';').map(x=>x.trim()).filter(Boolean).forEach(x=>satSet.add(x)));
+  const sats=[...satSet].sort();
+  document.getElementById('fSat').innerHTML='<option value="">All satellites</option>'+sats.map(s=>`<option value="${s}">${s}</option>`).join('');
+
+  const minStart=new Date(Math.min(...points.map(p=>p.window_start_utc?.getTime()||Infinity)));
+  const maxEnd=new Date(Math.max(...points.map(p=>p.window_end_utc?.getTime()||-Infinity)));
+  const toLocal=d=> d&&!isNaN(d)? new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
+  document.getElementById('fStart').value=toLocal(minStart);
+  document.getElementById('fEnd').value=toLocal(maxEnd);
+}
+function applyFilters(){
+  const u=document.getElementById('fUser').value.trim();
+  const s=document.getElementById('fSat').value.trim();
+  const q=document.getElementById('fSearch').value.trim().toLowerCase();
+  const startStr=document.getElementById('fStart').value, endStr=document.getElementById('fEnd').value;
+  const start=startStr?new Date(startStr):null, end=endStr?new Date(endStr):null;
+
+  filteredPoints=points.filter(p=>{
+    if(u && p.user!==u) return false;
+    if(q && String(p.point_id).toLowerCase().indexOf(q)===-1) return false;
+    if(s){ const used=(p.satellites_used||'').split(';').map(x=>x.trim()); if(!used.includes(s)) return false; }
+    if(start && p.window_end_utc && p.window_end_utc<start) return false;
+    if(end && p.window_start_utc && p.window_start_utc>end) return false;
+    return true;
+  });
+
+  renderMarkers(filteredPoints);
+  updateKPIs(filteredPoints);
+  renderBottom(filteredPoints);
+  updateUserLegend(filteredPoints);
+}
+/** KPIs (global + per-user) */
+function updateKPIs(list){
+  document.getElementById('kPoints').textContent=String(list.length);
+  document.getElementById('kObs').textContent=String(list.reduce((a,b)=>a+b.observation_count,0));
+  const avgs=list.map(p=>p.avg_observation_gap_h).filter(x=>x!=null&&isFinite(x));
+  const maxs=list.map(p=>p.max_observation_gap_h).filter(x=>x!=null&&isFinite(x));
+  document.getElementById('kAvg').textContent=avgs.length?(avgs.reduce((a,b)=>a+b,0)/avgs.length).toFixed(2):'-';
+  document.getElementById('kMax').textContent=maxs.length?Math.max(...maxs).toFixed(2):'-';
+
+  // Coverage(%)
+  let covCovered=0, covTotal=0;
+  for(const p of list){ const c=coverageForPoint(p); covCovered+=c.covered; covTotal+=c.total; }
+  document.getElementById('kCov').textContent = covTotal ? (100*covCovered/covTotal).toFixed(1) : '-';
+
+  // Per-user KPIs
+  const byUser = new Map();
+  for(const p of list){
+    if(!byUser.has(p.user)) byUser.set(p.user,{points:0,obs:0,avgGaps:[],maxGaps:[],covered:0,total:0});
+    const u = byUser.get(p.user);
+    u.points += 1;
+    u.obs    += p.observation_count || 0;
+    if(p.avg_observation_gap_h!=null && isFinite(p.avg_observation_gap_h)) u.avgGaps.push(p.avg_observation_gap_h);
+    if(p.max_observation_gap_h!=null && isFinite(p.max_observation_gap_h)) u.maxGaps.push(p.max_observation_gap_h);
+    const c = coverageForPoint(p); u.covered += c.covered; u.total += c.total;
+  }
+  const tbody=document.getElementById('kpiUserTbody'); tbody.innerHTML='';
+  const users=[...byUser.keys()].sort();
+  for(const u of users){
+    const v=byUser.get(u);
+    const uAvg = v.avgGaps.length ? (v.avgGaps.reduce((a,b)=>a+b,0)/v.avgGaps.length) : NaN;
+    const uMax = v.maxGaps.length ? Math.max(...v.maxGaps) : NaN;
+    const uCov = v.total ? (100*v.covered/v.total) : NaN;
+    const tr=document.createElement('tr');
+    tr.innerHTML = `
+      <td>${u}</td>
+      <td style="text-align:right">${v.points}</td>
+      <td style="text-align:right">${v.obs}</td>
+      <td style="text-align:right">${isFinite(uAvg)?uAvg.toFixed(2):'-'}</td>
+      <td style="text-align:right">${isFinite(uMax)?uMax.toFixed(2):'-'}</td>
+      <td style="text-align:right">${isFinite(uCov)?uCov.toFixed(1):'-'}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+/** User color legend */
+function updateUserLegend(list){
+  const cont = document.getElementById('userLegend');
+  if (!cont) return;
+  const users = [...new Set(list.map(p => p.user))].sort();
+  cont.innerHTML = users.map(u =>
+    `<span class="tl-chip"><i style="background:${colorForUser(u)}"></i>${u}</span>`
+  ).join('');
+}
+
+/* =========================
+   Bottom timelines (grouped)
+   ========================= */
+function renderBottom(list){
+  const body=document.getElementById('bottomBody'); body.innerHTML='';
+  const users=[...new Set(list.map(p=>p.user))].sort();
+  document.getElementById('btStats').textContent=`${users.length} user(s), ${list.length} point(s)`;
+
+  users.forEach((u,ui)=>{
+    const group=document.createElement('div'); group.className='ug'+(ui===0?' open':'');
+    const head=document.createElement('div'); head.className='ug-head';
+    head.innerHTML=`
+      <div class="ug-title">
+        <span class="badge">User</span><b>${u}</b>
+        <span class="muted">(${list.filter(p=>p.user===u).length} points)</span>
+      </div>
+      <div class="ug-actions"><span class="chip" data-user="${u}">🔎 Focus this user</span></div>`;
+    const bodyInner=document.createElement('div'); bodyInner.className='ug-body';
+
+    const pts=list.filter(p=>p.user===u).sort((a,b)=>String(a.point_id).localeCompare(String(b.point_id)));
+    const w=Math.max(620, body.clientWidth - 36);
+    pts.forEach(p=>{
+      const item=document.createElement('div'); item.className='tl-item';
+      item.innerHTML=`
+        <div class="tl-hdr">
+          <span class="badge mono">${p.point_id}</span>
+          <span class="muted">Obs: ${p.observation_count} • ${p.satellites_used || '—'}</span>
+        </div>
+        ${buildTimelineSVG(p, w, 64)}
+      `;
+      item.addEventListener('click',()=>{ const m=ensureMarker(p); map.setView(m.getLatLng(),9,{animate:true}); try{ m.openPopup(); }catch(_){} });
+      bodyInner.appendChild(item);
+    });
+
+    head.addEventListener('click',(ev)=>{ if(ev.target.closest('.chip')) return; document.querySelectorAll('#bottomBody .ug').forEach(el=>el.classList.remove('open')); group.classList.add('open'); });
+    head.querySelector('.chip').addEventListener('click',(ev)=>{ document.getElementById('fUser').value=ev.target.getAttribute('data-user'); applyFilters(); const bottom=document.getElementById('bottom'); bottom.classList.remove('collapsed'); document.getElementById('toggleBottom').textContent='Hide timelines'; });
+
+    group.appendChild(head); group.appendChild(bodyInner); body.appendChild(group);
+  });
+
+  if(!users.length) body.innerHTML=`<div class="panel muted">No points under current filters.</div>`;
+}
+
+/* =========================
+   Export
+   ========================= */
+function exportCurrent(){
+  const rows=[[ 'user','point_id','lat','lon','window_start_utc','window_end_utc','required_interval_hours','satellites_used','observation_count','observation_times_sat_utc','observation_times_utc' ]];
+  for(const p of filteredPoints){
+    const satTimes=(p.timesSat&&p.timesSat.length)? p.timesSat.map(([d,s])=>`${fmtUTC(d)} @ ${s}`).join(' | ') : '';
+    const tTimes=(p.times&&p.times.length)? p.times.map(d=>fmtUTC(d)).join(' | ') : '';
+    rows.push([p.user,p.point_id,p.lat,p.lon,fmtUTC(p.window_start_utc),fmtUTC(p.window_end_utc),p.required_interval_hours,p.satellites_used,p.observation_count,satTimes,tTimes]);
+  }
+  downloadCSV('tasking_filtered_export.csv', rows);
+}
+
+/* =========================
+   Splitter (drag to resize)
+   ========================= */
+function setupSplitter(){
+  const splitter=document.getElementById('splitter');
+  const bottom=document.getElementById('bottom');
+  const upper=document.getElementById('upper');
+
+  function mainHeight(){ return document.getElementById('main').clientHeight; }
+  function currentBottom(){ return bottom.getBoundingClientRect().height; }
+
+  function beginDrag(y){
+    if (bottom.classList.contains('collapsed')){
+      bottom.classList.remove('collapsed');
+      document.getElementById('toggleBottom').textContent='Hide timelines';
+      bottom.style.height = savedBottomH + 'px';
+      upper.style.height  = (mainHeight() - savedBottomH - splitter.clientHeight) + 'px';
+    }
+    isDragging=true; dragStartY=y; startBottomH=currentBottom();
+    document.body.style.cursor='row-resize';
+    document.body.style.userSelect='none';
+  }
+  function duringDrag(y){
+    if(!isDragging) return;
+    const delta = dragStartY - y;
+    const maxBottom = Math.max(MIN_BOTTOM, mainHeight() - MIN_UPPER - splitter.clientHeight);
+    let newBottom = Math.min(Math.max(startBottomH + delta, MIN_BOTTOM), maxBottom);
+    savedBottomH = newBottom;
+    bottom.style.height = newBottom + 'px';
+    upper.style.height  = (mainHeight() - newBottom - splitter.clientHeight) + 'px';
+  }
+  function endDrag(){
+    if(!isDragging) return;
+    isDragging=false;
+    document.body.style.cursor='';
+    document.body.style.userSelect='';
+    setTimeout(()=>{ try{ map.invalidateSize(); }catch(_){} renderBottom(filteredPoints); }, 0);
+  }
+
+  // Mouse
+  splitter.addEventListener('mousedown', (e)=> beginDrag(e.clientY));
+  window.addEventListener('mousemove', (e)=> duringDrag(e.clientY));
+  window.addEventListener('mouseup', endDrag);
+
+  // Touch
+  splitter.addEventListener('touchstart', (e)=> beginDrag(e.touches[0].clientY), {passive:true});
+  window.addEventListener('touchmove', (e)=> duringDrag(e.touches[0].clientY), {passive:true});
+  window.addEventListener('touchend', endDrag);
+
+  // Double click collapse/expand
+  splitter.addEventListener('dblclick', ()=>{
+    if (bottom.classList.contains('collapsed')){
+      bottom.classList.remove('collapsed');
+      document.getElementById('toggleBottom').textContent='Hide timelines';
+      bottom.style.height = savedBottomH + 'px';
+      upper.style.height  = (mainHeight() - savedBottomH - splitter.clientHeight) + 'px';
+    }else{
+      savedBottomH = currentBottom();
+      bottom.classList.add('collapsed');
+      document.getElementById('toggleBottom').textContent='Show timelines';
+    }
+    setTimeout(()=>{ try{ map.invalidateSize(); }catch(_){} renderBottom(filteredPoints); }, 0);
+  });
+
+  // Button
+  document.getElementById('toggleBottom').addEventListener('click', ()=>{
+    if (bottom.classList.contains('collapsed')){
+      bottom.classList.remove('collapsed');
+      document.getElementById('toggleBottom').textContent='Hide timelines';
+      bottom.style.height = savedBottomH + 'px';
+      upper.style.height  = (mainHeight() - savedBottomH - splitter.clientHeight) + 'px';
+    }else{
+      savedBottomH = currentBottom();
+      bottom.classList.add('collapsed');
+      document.getElementById('toggleBottom').textContent='Show timelines';
+    }
+    setTimeout(()=>{ try{ map.invalidateSize(); }catch(_){} renderBottom(filteredPoints); }, 0);
+  });
+
+  // Resize
+  window.addEventListener('resize', ()=>{
+    if (bottom.classList.contains('collapsed')) return;
+    const maxBottom = Math.max(MIN_BOTTOM, document.getElementById('main').clientHeight - MIN_UPPER - splitter.clientHeight);
+    let cur = currentBottom();
+    cur = Math.min(Math.max(cur, MIN_BOTTOM), maxBottom);
+    bottom.style.height = cur + 'px';
+    upper.style.height  = (document.getElementById('main').clientHeight - cur - splitter.clientHeight) + 'px';
+    setTimeout(()=>{ try{ map.invalidateSize(); }catch(_){} renderBottom(filteredPoints); }, 0);
+  });
+}
+
+/* =========================
+   Boot
+   ========================= */
+(async function(){
+  const mainH = document.getElementById('main').clientHeight;
+  const split = document.getElementById('splitter').clientHeight;
+  const initBottom = Math.max(MIN_BOTTOM, Math.round(mainH * 0.36));
+  document.getElementById('bottom').style.height = initBottom + 'px';
+  document.getElementById('upper').style.height  = (mainH - initBottom - split) + 'px';
+
+  initMap();
+  setupSplitter();
+
+  try{ await loadAll(); }catch(e){ showAlert('Failed to load CSVs: '+e.message); console.error(e); }
+
+  if(points.length){
+    fillFilterOptions();
+    applyFilters();
+
+    document.getElementById('btnApply').addEventListener('click', applyFilters);
+    document.getElementById('btnReset').addEventListener('click', ()=>{ document.getElementById('fUser').value=''; document.getElementById('fSat').value=''; document.getElementById('fSearch').value=''; applyFilters(); });
+    document.getElementById('btnExport').addEventListener('click', exportCurrent);
+  }
+})();
+</script>
+</body>
+</html>

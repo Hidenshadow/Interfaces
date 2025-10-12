@@ -55,7 +55,7 @@ TOL_FACTOR = 0.5                       # slot tolerance factor (±interval * TOL
 #   'access' -> use access_radius_km_used (usually larger, good for quick validation)
 #   'hybrid' -> cover_km + HYBRID_ALPHA * off_nadir_deg * cap_access_km_per_deg, capped by access
 MERGE_RADIUS_MODE = "cover"
-COVER_SCALE  = 2.0                      # scale cover_km
+COVER_SCALE  = 4.0                      # scale cover_km
 ACCESS_SCALE = 1.0                      # scale access_radius_km_used
 HYBRID_ALPHA = 0.6                      # km/deg multiplier in 'hybrid' mode
 DEFAULT_KM_PER_DEG = 30.0               # fallback if cap_access_km_per_deg missing
@@ -74,7 +74,7 @@ ALPHA_SELECT = 1e-3                     # small penalty per selected acquisition
 QUALITY_GAMMA = 0.0                     # weight in [0..1], penalize off-nadir: w = 1 - gamma * (off / max_off)
 
 # Solver
-TIME_LIMIT_SEC = 300                    # set to None for no limit
+TIME_LIMIT_SEC = 1200                   # set to None for no limit
 VERBOSE = True
 
 # ----------------------- Helpers -------------------------

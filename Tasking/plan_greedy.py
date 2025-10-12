@@ -45,7 +45,7 @@ SLEW_BUFFER_SEC = 60                 # minimal gap between acquisitions per sate
 
 # ---- Multi-cover knobs ----
 MERGE_RADIUS_MODE = 'cover'          # 'cover' | 'access' | 'hybrid'
-COVER_SCALE       = 2.0              # scale on cover_km (swath/2)
+COVER_SCALE       = 4.0              # scale on cover_km (swath/2)
 ACCESS_SCALE      = 1.0              # scale on access_radius_km_used
 HYBRID_ALPHA      = 0.6              # km/deg * off_nadir for hybrid expansion (capped by access)
 MERGE_SAME_USER_ONLY   = False       # True => only multi-cover within the same user

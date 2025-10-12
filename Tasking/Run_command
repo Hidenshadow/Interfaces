@@ -14,12 +14,18 @@ python generate_candidates.py
 
 # 3) 贪心排程（读取 candidates.csv + test.csv）
 python plan_greedy.py
+python plan_tabu.py
+python plan_milp.py
+python plan_mis.py
 
 # 4) 导出“单行堆叠版”覆盖汇总
 python analysis.py
 
 
 
+
+
+#github update
 
 git status                       # 看看改了什么（可选）
 git add -A                       # 收集所有改动（新增/修改/删除）
