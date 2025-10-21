@@ -15,7 +15,6 @@
 
   <style>
     :root{
-      /* Blue theme */
       --brand:#1f6fe5;
       --brand-dark:#184fb0;
       --accent:#2ecc71;
@@ -26,6 +25,7 @@
       --bg:#f3f6fb;
       --card:#ffffff;
       --border:#e1e6f0;
+      --custom:#6c5ce7; /* purple for custom points */
     }
     *{box-sizing:border-box}
     html,body{height:100%}
@@ -127,7 +127,7 @@
           </thead>
           <tbody id="selected-tbody"></tbody>
         </table>
-        <div class="muted" style="margin-top:6px">Tip: Click points on map to toggle select; use “Select by Rectangle” in Step 3.</div>
+        <div class="muted" style="margin-top:6px">Tip: Click RAW points to toggle; <b>right‑click</b> empty map to add a custom point. Click a purple point to edit.</div>
       </div>
 
       <div class="panel">
@@ -179,7 +179,8 @@
       </div>
       <div class="legend-inline" style="margin-top:6px;">
         <div class="legend-item"><span class="dot" style="background:var(--warn);"></span> RAW point</div>
-        <div class="legend-item"><span class="dot" style="background:var(--accent);"></span> Selected</div>
+        <div class="legend-item"><span class="dot" style="background:var(--accent);"></span> Selected RAW</div>
+        <div class="legend-item"><span class="dot" style="background:var(--custom);"></span> Custom point</div>
       </div>
       <div class="muted" style="margin-top:6px;">This window filters the historical detections to display and select from.</div>
     </div>
@@ -190,13 +191,13 @@
       <div class="row" style="margin-bottom:6px;">
         <button class="small-btn" id="btnRectSelect">Select by Rectangle</button>
       </div>
-      <div class="muted">Click points on the map to select/unselect. Use the right panel to edit, bulk-remove, or set per-point frequency.</div>
+      <div class="muted">Left‑click RAW points to select/unselect. <b>Right‑click</b> empty map to add a custom point (purple). Click a custom point to edit/delete.</div>
     </div>
 
     <!-- Step 4 -->
     <div id="step4" class="wizard-step" style="display:none">
       <h4>Step 4 — Observation Window & Default Interval</h4>
-      <div class="row" id="obsDateRow"><span class="muted" id="obsHint">Observation window (example): 2025-01-01 → 2025-01-20. You can change anytime.</span></div>
+      <div class="row" id="obsDateRow"><span class="muted" id="obsHint">Observation window (example): 2025-01-01 → 2025-01-20.</span></div>
       <div class="row" style="margin-top:4px;">
         Start: <input type="date" id="obsStart">
         End: <input type="date" id="obsEnd">
@@ -222,8 +223,10 @@
         <div class="muted" id="satSourceHint">Loading tracks/index.json…</div>
         <div class="listbox" id="satList" aria-label="Available satellites"></div>
       </div>
-      <div class="row" style="margin-top:8px;justify-content:flex-end;">
-        <button class="small-btn outline" id="btnClearSats">Clear satellites</button>
+      <div class="row" style="margin-top:8px;justify-content:flex-end;gap:8px;">
+        <button class="small-btn" id="btnSelectAllSats">Select all</button>
+        <button class="small-btn outline" id="btnInvertSats">Invert</button>
+        <button class="small-btn ghost" id="btnClearSats">Clear satellites</button>
         <button class="small-btn" id="btnExportTaskCSV">Export task request CSV</button>
       </div>
     </div>
@@ -248,38 +251,29 @@
 
   <script>
     // =========================
-    // Config
+    // Config / Globals
     // =========================
     const TILE_DIR = 'tiles';
     const TRACK_DIR = 'tracks';
-
     const OBS_DEFAULT_START = '2025-01-01';
     const OBS_DEFAULT_END   = '2025-01-20';
     const OBS_MIN = '2024-01-01';
     const OBS_MAX = '2026-12-31';
 
-    // =========================
-    // Globals
-    // =========================
-    let META=null, INDEX=null;
-    let TRACK_INDEX=null;
-
+    let META=null, INDEX=null, TRACK_INDEX=null;
     let TILE_MIN_DATE=null, TILE_MAX_DATE=null;
 
     const users = {}; let currentUser=null;
-
     let wizardStep = 1;
     const steps = ['User','Data Window','Select Points','Observation','Satellites'];
-
     const dataDates=[];   // RAW tiles dates
     const obsDates=[];    // observation window dates
 
-    // ---- per-user satellites (bugfix) ----
+    // Per-user satellites
     const satellitesByUser = {}; // { username: Set<string> }
-    const selectedSats = new Set(); // legacy global; mirror current user for兼容
-
+    const selectedSats = new Set(); // mirror current user for compatibility
     function getCurrentSatSet(){
-      if (!currentUser) return selectedSats; // fallback
+      if (!currentUser) return selectedSats;
       if (!satellitesByUser[currentUser]) satellitesByUser[currentUser] = new Set();
       return satellitesByUser[currentUser];
     }
@@ -291,22 +285,18 @@
 
     // Map
     const canvasRenderer = L.canvas({ padding: 0.2 });
-    const map = L.map('map', { preferCanvas: true }).setView([0, 0], 2);
+    const map = L.map('map', { preferCanvas: true, contextmenu: true }).setView([0, 0], 2);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {maxZoom:19,attribution:'&copy; OpenStreetMap & CARTO'}).addTo(map);
+
+    // Layer for custom points
+    const customLayer = L.layerGroup().addTo(map);
+    const customMarkers = new Map(); // id -> marker
 
     // Helpers — dates
     function pad2(n){ return String(n).padStart(2,'0'); }
     function ymd_UTC(d){ return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth()+1)}-${pad2(d.getUTCDate())}`; }
     function parseYMD(s){ const [y,m,d]=s.split('-').map(Number); return new Date(Date.UTC(y,m-1,d)); }
     function listDays(start,end){ const out=[]; for(let d=parseYMD(start); d<=parseYMD(end); d.setUTCDate(d.getUTCDate()+1)) out.push(ymd_UTC(d)); return out; }
-
-    function setupObservationPickers(){
-      const s=document.getElementById('obsStart'), e=document.getElementById('obsEnd');
-      if(OBS_MIN){ s.min=OBS_MIN; e.min=OBS_MIN; }
-      if(OBS_MAX){ s.max=OBS_MAX; e.max=OBS_MAX; }
-      s.value=OBS_DEFAULT_START; e.value=OBS_DEFAULT_END;
-      document.getElementById('obsHint').textContent = `Observation window (example): ${OBS_DEFAULT_START} → ${OBS_DEFAULT_END}. You can change anytime.`;
-    }
 
     function setStep(n){
       wizardStep=n;
@@ -333,7 +323,7 @@
         const e=document.getElementById('obsEnd').value;
         canNext=!!(s && e && e>=s);
       } else if(wizardStep===5){
-        canNext=true; // Done enabled
+        canNext=true;
       }
       next.disabled=!canNext; next.textContent=(wizardStep<5?'Next':'Done');
     }
@@ -349,7 +339,7 @@
     function rcRangeForBounds(bounds){
       const sw=bounds.getSouthWest(), ne=bounds.getNorthEast();
       let r0=latToRow(sw.lat), r1=latToRow(ne.lat); if(r1<r0)[r0,r1]=[r1,r0];
-      let c0=lonToCol(sw.lng), c1=lonToCol(ne.lng); if(c1<c0)[c0,c1]=[c0,c1];
+      let c0=lonToCol(sw.lng), c1=lonToCol(ne.lng); if(c1<c0)[c0,c1]=[c1,c0]; // fixed swap
       return { r0, r1, c0, c1 };
     }
 
@@ -372,6 +362,7 @@
     function varGet(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
     function baseStyle(){ return {renderer:canvasRenderer, radius:5, color:'#f39c12', fillColor:varGet('--warn'), fillOpacity:.9, weight:1}; }
     function selectedStyle(){ return {renderer:canvasRenderer, radius:6, color:varGet('--accent'), fillColor:varGet('--accent'), fillOpacity:.92, weight:2}; }
+    function customStyle(){ const c=getComputedStyle(document.documentElement).getPropertyValue('--custom').trim(); return {renderer:canvasRenderer, radius:6, color:c, fillColor:c, fillOpacity:.95, weight:2}; }
     const b=v=>(v===undefined||v===null||v==='')?'—':v;
 
     function createMarker(pt){
@@ -384,7 +375,7 @@
         <div>Lat: ${pt.lat.toFixed(5)}, Lon: ${pt.lon.toFixed(5)}</div>
         <div style="margin-top:4px;"><em>Click to select/unselect.</em></div>
       `);
-      m.on('click',()=>togglePoint(pt.id));
+      m.on('click',()=>togglePoint(pt.id)); // left-click RAW points
       return m;
     }
 
@@ -409,11 +400,50 @@
     function addTile(entry){ if(!entry||entry.added||entry.state!=='ready')return; entry.layer.addTo(map); entry.added=true; restyleTileMarkers(entry); }
     function removeTile(entry){ if(!entry||!entry.added)return; try{ map.removeLayer(entry.layer);}catch(_){} entry.added=false; }
     function restyleTileMarkers(entry){
-      const arr=users[currentUser]||[]; const sel=new Set(arr.map(s=>s.id));
+      const arr=users[currentUser]||[]; const sel=new Set(arr.filter(s=>!s.id.startsWith('custom|')).map(s=>s.id));
       for(const mk of entry.markers){ mk.setStyle(sel.has(mk._rawId)?selectedStyle():baseStyle()); }
     }
     function clearAllTiles(){ for(const [,cache] of tileCache.entries()){ for(const [,e] of cache.entries()){ removeTile(e); } } tileCache.clear(); }
+
+    // Custom marker helpers
+    function customTooltipText(p){
+      const freq = (p.frequency==null || p.frequency==='') ? '—' : p.frequency+'h';
+      return `Custom\\n${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}\\nFreq: ${freq}`;
+    }
+    function updateCustomMarkerTooltip(id){
+      const mk = customMarkers.get(id);
+      if(!mk) return;
+      const p = (users[currentUser]||[]).find(x=>x.id===id);
+      if(!p) return;
+      const tt = mk.getTooltip();
+      if(tt) tt.setContent(customTooltipText(p)); else mk.bindTooltip(customTooltipText(p), {sticky:true});
+    }
+    function createCustomMarker(id, lat, lon){
+      const mk = L.circleMarker([lat, lon], customStyle());
+      mk._cid = id;
+      mk.on('click', ()=> openCustomMenu(mk));
+      customLayer.addLayer(mk);
+      customMarkers.set(id, mk);
+      const p = (users[currentUser]||[]).find(x=>x.id===id);
+      mk.bindTooltip(customTooltipText(p||{lat,lon,frequency:null}), {sticky:true});
+      return mk;
+    }
+    function removeCustomMarker(id){
+      const mk = customMarkers.get(id);
+      if(mk){ try{ customLayer.removeLayer(mk); }catch(_){} customMarkers.delete(id); }
+    }
+    function rebuildCustomMarkersForCurrentUser(){
+      customLayer.clearLayers(); customMarkers.clear();
+      const arr = users[currentUser]||[];
+      for(const p of arr){
+        if(String(p.id).startsWith('custom|')){
+          createCustomMarker(p.id, p.lat, p.lon);
+        }
+      }
+    }
+
     function unstyleMarkerById(id){
+      if(id.startsWith('custom|')){ removeCustomMarker(id); return true; }
       for(const [,cache] of tileCache.entries()){
         for(const [,entry] of cache.entries()){
           if(!entry.added) continue;
@@ -512,6 +542,63 @@
       refreshSelectedList();
     }
 
+    function addCustomPoint(lat, lon, frequency){
+      ensureUser(currentUser);
+      const id = `custom|${lat}|${lon}|${Math.random().toString(36).slice(2,8)}`;
+      users[currentUser].push({id,lat,lon,fire_count:1,frequency:frequency ?? null});
+      createCustomMarker(id, lat, lon);
+      refreshSelectedList();
+      return id;
+    }
+
+    function openCustomMenu(marker){
+      if(!currentUser) return;
+      const id = marker._cid;
+      const arr = users[currentUser] || [];
+      const idx = arr.findIndex(p=>p.id===id);
+      if(idx===-1) return;
+      const p = arr[idx];
+      const latlng = marker.getLatLng();
+      const html = `
+        <div style="min-width:240px;">
+          <div><b>Custom point</b></div>
+          <div>Lat: ${p.lat.toFixed(5)}, Lon: ${p.lon.toFixed(5)}</div>
+          <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <label>Freq (h) <input id="menuFreq" type="number" min="0" step="1" style="width:80px" value="${p.frequency ?? ''}"/></label>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;">
+            <button id="menuDelete" class="small-btn danger">Delete</button>
+            <button id="menuSave" class="small-btn">Save</button>
+            <button id="menuCancel" class="small-btn ghost">Cancel</button>
+          </div>
+        </div>`;
+      if(window._customMenu){ map.closePopup(window._customMenu); }
+      const pop = L.popup().setLatLng(latlng).setContent(html).openOn(map);
+      window._customMenu = pop;
+      setTimeout(()=>{
+        const del = document.getElementById('menuDelete');
+        const save = document.getElementById('menuSave');
+        const cancel = document.getElementById('menuCancel');
+        const freq = document.getElementById('menuFreq');
+        if(del) del.addEventListener('click', ()=>{
+          arr.splice(idx,1);
+          removeCustomMarker(id);
+          refreshSelectedList();
+          try{ map.closePopup(pop); }catch(_){}
+        });
+        if(save) save.addEventListener('click', ()=>{
+          const val = (freq && freq.value!=='') ? Math.max(0, Math.floor(+freq.value)) : null;
+          arr[idx].frequency = val;
+          updateCustomMarkerTooltip(id);
+          refreshSelectedList();
+          try{ map.closePopup(pop); }catch(_){}
+        });
+        if(cancel) cancel.addEventListener('click', ()=>{
+          try{ map.closePopup(pop); }catch(_){}
+        });
+      },0);
+    }
+
     function refreshSelectedList(){
       const tbody=document.getElementById('selected-tbody'); tbody.innerHTML='';
       const arr=users[currentUser]||[];
@@ -534,13 +621,18 @@
           const v=e.target.value===''?null:Math.max(0,Math.round(+e.target.value));
           const idx=(users[currentUser]||[]).findIndex(p=>p.id===id);
           if(idx!==-1) users[currentUser][idx].frequency=v;
+          if(String(id).startsWith('custom|')) updateCustomMarkerTooltip(id);
         });
       });
       tbody.querySelectorAll('button.small-btn.danger').forEach(btn=>{
         btn.addEventListener('click',e=>{
           const id=e.target.getAttribute('data-id');
           const arr=users[currentUser]||[]; const idx=arr.findIndex(p=>p.id===id);
-          if(idx!==-1){ arr.splice(idx,1); unstyleMarkerById(id); refreshSelectedList(); }
+          if(idx!==-1){
+            arr.splice(idx,1);
+            unstyleMarkerById(id);
+            refreshSelectedList();
+          }
         });
       });
 
@@ -566,7 +658,7 @@
     }
 
     // =========================
-    // Satellites / tracks (Step 5) — per-user selection
+    // Satellites / tracks (Step 5)
     // =========================
     function satColor(name){ let h=0; for(let i=0;i<name.length;i++){ h=(h*31 + name.charCodeAt(i)) % 360; } return `hsl(${h},70%,45%)`; }
     function trackKey(date,sat){ return `${date}|${sat}`; }
@@ -584,7 +676,6 @@
         const js=await res.json();
         const color=satColor(sat);
 
-        // accept shapes: {segments:[[lat,lon,ts]...]} or {lats,lons}
         if (Array.isArray(js.segments)) {
           for (const seg of js.segments) {
             const latlngs = seg.map(p => [ +p[0], +p[1] ]);
@@ -612,7 +703,6 @@
       clearAllTrackLayers();
       if(!show || obsDates.length===0) return;
 
-      // use current user's selection
       syncSelectedSatsFromUser();
       if(selectedSats.size===0) return;
 
@@ -645,8 +735,7 @@
         box.appendChild(row);
       }
 
-      // 回显与监听：写入当前用户集合，并同步全局 selectedSats 以兼容其它逻辑
-      syncSelectedSatsFromUser(); // 先把全局镜像成当前用户的
+      syncSelectedSatsFromUser();
       box.querySelectorAll('.sat-check').forEach(cb=>{
         cb.checked = userSet.has(cb.value);
         cb.addEventListener('change', e=>{
@@ -663,14 +752,37 @@
       });
     }
 
+    function selectAllSatellites(){
+      const box=document.getElementById('satList');
+      const checks=box.querySelectorAll('.sat-check');
+      if(!checks.length){ alert('No satellites available for the current observation window.'); return; }
+      const userSet=getCurrentSatSet();
+      // Set all checked, then rebuild sets from UI
+      checks.forEach(cb=>{ cb.checked=true; });
+      userSet.clear(); selectedSats.clear();
+      checks.forEach(cb=>{ userSet.add(cb.value); selectedSats.add(cb.value); });
+      rebuildTracksOnMap();
+    }
+    function invertSatellites(){
+      const box=document.getElementById('satList');
+      const checks=box.querySelectorAll('.sat-check');
+      if(!checks.length){ alert('No satellites available for the current observation window.'); return; }
+      const userSet=getCurrentSatSet();
+      checks.forEach(cb=>{ cb.checked=!cb.checked; });
+      // Rebuild sets from UI state
+      userSet.clear(); selectedSats.clear();
+      checks.forEach(cb=>{ if(cb.checked){ userSet.add(cb.value); selectedSats.add(cb.value); } });
+      rebuildTracksOnMap();
+    }
+
     // =========================
-    // Exports (per-user satellites)
+    // Exports
     // =========================
-    function toCSV(rows){ const esc=s=>'"'+String(s).replace(/"/g,'""')+'"'; return rows.map(r=>r.map(esc).join(',')).join('\n'); }
+    function toCSV(rows){ const esc=s=>'\"'+String(s).replace(/\"/g,'\"\"')+'\"'; return rows.map(r=>r.map(esc).join(',')).join('\\n'); }
     function downloadCSV(filename, rows){ const blob=new Blob([toCSV(rows)],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); }
     function exportCurrentUser(){
       if(!currentUser){ alert('Please select a user.'); return; }
-      const rows=[['username','lat','lon','fire_count','frequency_hours']];
+      const rows=[["username","lat","lon","fire_count","frequency_hours"]];
       for(const p of (users[currentUser]||[])) rows.push([currentUser,p.lat,p.lon,p.fire_count,p.frequency??'' ]);
       downloadCSV(`${currentUser}_selected_raw_points.csv`, rows);
     }
@@ -689,7 +801,7 @@
 
       let count = 0;
       for (const [uname, arr] of Object.entries(users)) {
-        const satStr = [...(satellitesByUser[uname] || new Set())].join(';'); // 每用户自己的
+        const satStr = [...(satellitesByUser[uname] || new Set())].join(';');
         for (const p of arr) {
           const req = (p.frequency == null || p.frequency === '') ? defInt : p.frequency;
           rows.push([uname, start, end, satStr, p.id, p.lat, p.lon, req]);
@@ -708,7 +820,7 @@
       if(obsDates.length===0){ alert('Set observation window in Step 4.'); return; }
       const start=obsDates[0] + ' 00:00:00Z';
       const end=obsDates[obsDates.length-1] + ' 23:59:59Z';
-      const satStr=[...getCurrentSatSet()].join(';'); // 当前用户
+      const satStr=[...getCurrentSatSet()].join(';');
       const def=Math.max(1,Math.floor(+document.getElementById('defaultInterval').value||4));
       const rows=[[ 'user','window_start_utc','window_end_utc','satellites','point_id','lat','lon','required_interval_hours' ]];
       for(const p of (users[currentUser]||[])){ const req=(p.frequency==null||p.frequency==='')?def:p.frequency; rows.push([ currentUser,start,end,satStr,p.id,p.lat,p.lon,req ]); }
@@ -716,7 +828,46 @@
     }
 
     // =========================
-    // Done modal
+    // Right-click add custom point
+    // =========================
+    let pendingPopup=null;
+    function showAddCustomPopup(latlng){
+      if(!currentUser){ alert('Please add/select a user first.'); return; }
+      const lat=+latlng.lat.toFixed(5), lon=+latlng.lng.toFixed(5);
+      const html = `
+        <div style="min-width:220px;">
+          <div><b>Create custom point here?</b></div>
+          <div>Lat: ${lat}, Lon: ${lon}</div>
+          <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <label>Freq (h) <input id="popupFreq" type="number" min="0" step="1" style="width:80px"/></label>
+            <button id="popupAdd" class="small-btn">Add</button>
+            <button id="popupCancel" class="small-btn ghost">Cancel</button>
+          </div>
+        </div>`;
+      if(pendingPopup){ map.closePopup(pendingPopup); pendingPopup=null; }
+      pendingPopup = L.popup().setLatLng(latlng).setContent(html).openOn(map);
+      setTimeout(()=>{
+        const addBtn = document.getElementById('popupAdd');
+        const cancelBtn = document.getElementById('popupCancel');
+        const freqInp = document.getElementById('popupFreq');
+        if(addBtn){
+          addBtn.addEventListener('click', ()=>{
+            const freqVal = (freqInp && freqInp.value!=='' ? Math.max(0, Math.floor(+freqInp.value)) : null);
+            addCustomPoint(lat, lon, freqVal);
+            map.closePopup(pendingPopup); pendingPopup=null;
+          });
+        }
+        if(cancelBtn){ cancelBtn.addEventListener('click', ()=>{ map.closePopup(pendingPopup); pendingPopup=null; }); }
+      },0);
+    }
+
+    map.on('contextmenu', (e)=>{
+      if(e.originalEvent){ e.originalEvent.preventDefault(); }
+      showAddCustomPopup(e.latlng);
+    });
+
+    // =========================
+    // Done modal & Wizard nav
     // =========================
     function showDone(){ document.getElementById('doneOverlay').classList.remove('hidden'); document.getElementById('doneDialog').classList.remove('hidden'); }
     function hideDone(){ document.getElementById('doneOverlay').classList.add('hidden'); document.getElementById('doneDialog').classList.add('hidden'); }
@@ -727,9 +878,6 @@
       }, 300);
     }
 
-    // =========================
-    // Wizard nav
-    // =========================
     function onPrev(){ if(wizardStep>1){ setStep(wizardStep-1); } }
     function onNext(){
       if(wizardStep===1){
@@ -747,7 +895,6 @@
         if(!s||!e||e<s){ alert('Please set a valid observation window.'); return; }
         obsDates.length=0; listDays(s,e).forEach(d=>obsDates.push(d));
         document.getElementById('satDates').textContent=`Observation window: ${s} → ${e}`;
-        // 切到卫星步骤时，同步当前用户 -> 全局，并刷新 UI
         syncSelectedSatsFromUser();
         buildSatelliteList();
         rebuildTracksOnMap();
@@ -769,13 +916,12 @@
       if(!sel.value && Object.keys(users).length) sel.value=Object.keys(users)[0];
       currentUser=sel.value||null;
 
-      // 切换用户：同步该用户的卫星 -> 全局；刷新复选框与轨迹
       syncSelectedSatsFromUser();
       buildSatelliteList();
       rebuildTracksOnMap();
+      rebuildCustomMarkersForCurrentUser();
 
       refreshSelectedList(); updateWizardButtons();
-      // 重绘当前用户样式
       for(const [,cache] of tileCache.entries()){ for(const [,entry] of cache.entries()){ if(entry.added) restyleTileMarkers(entry); } }
     }
 
@@ -784,7 +930,7 @@
       const sel=document.getElementById('userSelect');
       if(name){
         if(!users[name]) users[name]=[];
-        if(!satellitesByUser[name]) satellitesByUser[name] = new Set(); // 初始化该用户的卫星集合
+        if(!satellitesByUser[name]) satellitesByUser[name] = new Set();
         sel.value=name; currentUser=name; document.getElementById('newUserName').value='';
         refreshUserDropdown();
       }else{
@@ -828,19 +974,16 @@
       const lat=parseFloat(document.getElementById('customLat').value);
       const lon=parseFloat(document.getElementById('customLon').value);
       if(!Number.isFinite(lat)||!Number.isFinite(lon)){ alert('Please input valid lat/lon.'); return; }
-      ensureUser(currentUser);
-      const id=`custom|${lat}|${lon}|${Math.random().toString(36).slice(2,8)}`;
-      if((users[currentUser]||[]).findIndex(p=>p.id===id)===-1){
-        users[currentUser].push({id,lat,lon,fire_count:1,frequency:null});
-        refreshSelectedList();
-      }
+      addCustomPoint(lat, lon, null);
     });
 
     document.getElementById('chkShowTracks').addEventListener('change',rebuildTracksOnMap);
+    document.getElementById('btnSelectAllSats').addEventListener('click',selectAllSatellites);
+    document.getElementById('btnInvertSats').addEventListener('click',invertSatellites);
     document.getElementById('btnClearSats').addEventListener('click',()=>{
       const set = getCurrentSatSet();
       set.clear();
-      selectedSats.clear(); // 同步清空
+      selectedSats.clear();
       document.querySelectorAll('#satList .sat-check').forEach(cb=>cb.checked=false);
       rebuildTracksOnMap();
     });
@@ -859,7 +1002,6 @@
 
     // Boot
     (async function boot(){
-      // Tiles meta/index
       try{
         const [m,i]=await Promise.all([
           fetch(`${TILE_DIR}/meta.json`,{cache:'no-cache'}).then(r=>r.json()),
@@ -880,7 +1022,6 @@
         document.getElementById('tileDateHint').textContent='Failed to load tiles meta/index.'; console.error(e);
       }
 
-      // Tracks index
       try{
         const t=await fetch(`${TRACK_DIR}/index.json`,{cache:'no-cache'});
         if(t.ok){ TRACK_INDEX=await t.json(); document.getElementById('satSourceHint').textContent='Tracks index loaded.'; }
@@ -892,7 +1033,6 @@
       users['User1']=[]; satellitesByUser['User1']=new Set(); currentUser='User1';
       refreshUserDropdown();
 
-      // default observation window
       const s=document.getElementById('obsStart'), e=document.getElementById('obsEnd');
       s.value=OBS_DEFAULT_START; e.value=OBS_DEFAULT_END;
       document.getElementById('obsHint').textContent = `Observation window (example): ${OBS_DEFAULT_START} → ${OBS_DEFAULT_END}. You can change anytime.`;
