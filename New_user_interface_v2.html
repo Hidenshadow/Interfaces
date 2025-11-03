@@ -122,7 +122,7 @@
           <thead>
           <tr>
             <th class="check-cell"><input type="checkbox" id="checkAllRows" title="Select / unselect all"/></th>
-            <th>#</th><th>Lat</th><th>Lon</th><th>Fire Count</th><th>Freq (h)</th><th>Action</th>
+            <th>#</th><th>Lat</th><th>Lon</th><th>Fire Count</th><th>Freq (h)</th><th>Priority (0–1)</th><th>Action</th>
           </tr>
           </thead>
           <tbody id="selected-tbody"></tbody>
@@ -442,7 +442,7 @@
       customLayer.addLayer(mk);
       customMarkers.set(id, mk);
       const p = (users[currentUser]||[]).find(x=>x.id===id);
-      mk.bindTooltip(customTooltipText(p||{lat,lon,frequency:null}), {sticky:true});
+      mk.bindTooltip(customTooltipText(p||{lat,lon,frequency:null,priority:1}), {sticky:true});
       return mk;
     }
     function removeCustomMarker(id){
@@ -553,7 +553,7 @@ function onCreated(e){
           const id = mk._rawId;
           const arr = users[currentUser];
           if(arr.findIndex(s=>s.id===id)===-1){
-            arr.push({id,lat:ll.lat,lon:ll.lng,fire_count:1,frequency:null});
+            arr.push({id,lat:ll.lat,lon:ll.lng,fire_count:1,frequency:null,priority:1});
             try{ mk.setStyle(selectedStyle()); }catch(e){}
             addedRaw++;
           }
@@ -569,9 +569,9 @@ function onCreated(e){
     return;
   }
 
-  // 2) Fixed-density fallback (1 point per 50 km²), with pre-estimation & confirmation
-  const FIXED_DENSITY = 0.02; // pts/km²
-  const MAX_PER_BATCH = 200;
+  // 2) Fixed-density fallback (1 point per 100 km²), with pre-estimation & confirmation
+  const FIXED_DENSITY = 0.01; // pts/km²
+  const MAX_PER_BATCH = 500;
   const CONFIRM_THRESHOLD = 150;
   const KM_PER_DEG = 111.32;
   const COS_MIN = 0.1;
@@ -687,16 +687,17 @@ if (nPred >= CONFIRM_THRESHOLD) {
       if(!found) return;
       const ll=found.getLatLng();
 
-      if(idx===-1){ arr.push({id,lat:ll.lat,lon:ll.lng,fire_count:1,frequency:null}); found.setStyle(selectedStyle()); }
+      if(idx===-1){ arr.push({id,lat:ll.lat,lon:ll.lng,fire_count:1,frequency:null,priority:1}); found.setStyle(selectedStyle()); }
       else{ arr.splice(idx,1); found.setStyle(baseStyle()); }
 
       refreshSelectedList();
     }
 
-    function addCustomPoint(lat, lon, frequency){
+    function addCustomPoint(lat, lon, frequency, priority){
       ensureUser(currentUser);
       const id = `custom|${lat}|${lon}|${Math.random().toString(36).slice(2,8)}`;
-      users[currentUser].push({id,lat,lon,fire_count:1,frequency:frequency ?? null});
+      const pri = (priority==null || priority==='') ? 1 : Math.max(0, Math.min(1, +priority || 1));
+      users[currentUser].push({id,lat,lon,fire_count:1,frequency:frequency ?? null, priority: pri});
       createCustomMarker(id, lat, lon);
       refreshSelectedList();
       return id;
@@ -716,6 +717,9 @@ if (nPred >= CONFIRM_THRESHOLD) {
           <div>Lat: ${p.lat.toFixed(5)}, Lon: ${p.lon.toFixed(5)}</div>
           <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
             <label>Freq (h) <input id="menuFreq" type="number" min="0" step="1" style="width:80px" value="${p.frequency ?? ''}"/></label>
+          </div>
+          <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <label>Priority <input id="menuPri" type="number" min="0" max="1" step="0.1" style="width:80px" value="${p.priority ?? 1}"/></label>
           </div>
           <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;">
             <button id="menuDelete" class="small-btn danger">Delete</button>
@@ -740,6 +744,14 @@ if (nPred >= CONFIRM_THRESHOLD) {
         if(save) save.addEventListener('click', ()=>{
           const val = (freq && freq.value!=='') ? Math.max(0, Math.floor(+freq.value)) : null;
           arr[idx].frequency = val;
+          const pri = document.getElementById('menuPri');
+          let pv = 1;
+          if (pri && pri.value!=='') {
+            pv = +pri.value;
+            if (isNaN(pv)) pv = 1;
+            pv = Math.max(0, Math.min(1, pv));
+          }
+          arr[idx].priority = pv;
           updateCustomMarkerTooltip(id);
           refreshSelectedList();
           try{ map.closePopup(pop); }catch(_){}
@@ -762,7 +774,11 @@ if (nPred >= CONFIRM_THRESHOLD) {
           <td>${p.lon.toFixed(5)}</td>
           <td>${p.fire_count}</td>
           <td><input type="number" min="0" step="1" value="${p.frequency ?? ''}" data-id="${p.id}" class="freq-input" placeholder="e.g., 12"/></td>
-          <td><button class="small-btn danger" data-id="${p.id}">Remove</button></td>`;
+          <td>
+            <input type="number" min="0" max="1" step="0.1" value="${p.priority ?? 1}" data-id="${p.id}" class="pri-input" placeholder="0–1"/>
+          </td>
+          <td><button class="small-btn danger" data-id="${p.id}">Remove</button></td>
+        `;
         tbody.appendChild(tr);
       });
 
@@ -773,6 +789,17 @@ if (nPred >= CONFIRM_THRESHOLD) {
           const idx=(users[currentUser]||[]).findIndex(p=>p.id===id);
           if(idx!==-1) users[currentUser][idx].frequency=v;
           if(String(id).startsWith('custom|')) updateCustomMarkerTooltip(id);
+        });
+      });
+      tbody.querySelectorAll('.pri-input').forEach(inp=>{
+        inp.addEventListener('input', e=>{
+          const id = e.target.getAttribute('data-id');
+          let v = e.target.value === '' ? 1 : +e.target.value;
+          if (isNaN(v)) v = 1;
+          v = Math.max(0, Math.min(1, v));
+          const idx = (users[currentUser]||[]).findIndex(p=>p.id===id);
+          if (idx!==-1) users[currentUser][idx].priority = v;
+          if (String(id).startsWith('custom|')) updateCustomMarkerTooltip(id);
         });
       });
       tbody.querySelectorAll('button.small-btn.danger').forEach(btn=>{
@@ -867,6 +894,7 @@ if (nPred >= CONFIRM_THRESHOLD) {
       const box=document.getElementById('satList'); const hint=document.getElementById('satSourceHint');
       box.innerHTML='';
       if(!TRACK_INDEX){ hint.textContent='tracks/index.json not loaded.'; return; }
+
       if(obsDates.length===0){ hint.textContent='Set observation window in Step 4.'; return; }
       const set=new Set(); for(const d of obsDates){ (TRACK_INDEX[d]||[]).forEach(s=>set.add(s)); }
       if(set.size===0){ hint.textContent='No tracks available for chosen observation window.'; return; }
@@ -902,6 +930,9 @@ if (nPred >= CONFIRM_THRESHOLD) {
         });
       });
     }
+    // Alias for older callsite
+    const rebuildSatList = buildSatelliteList;
+
 
     function selectAllSatellites(){
       const box=document.getElementById('satList');
@@ -931,12 +962,15 @@ if (nPred >= CONFIRM_THRESHOLD) {
     // =========================
     function toCSV(rows){ const esc=s=>'\"'+String(s).replace(/\"/g,'\"\"')+'\"'; return rows.map(r=>r.map(esc).join(',')).join('\\n'); }
     function downloadCSV(filename, rows){ const blob=new Blob([toCSV(rows)],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); }
+
     function exportCurrentUser(){
       if(!currentUser){ alert('Please select a user.'); return; }
-      const rows=[["username","lat","lon","fire_count","frequency_hours"]];
-      for(const p of (users[currentUser]||[])) rows.push([currentUser,p.lat,p.lon,p.fire_count,p.frequency??'' ]);
+      const rows=[["username","lat","lon","fire_count","frequency_hours","priority"]];
+      for(const p of (users[currentUser]||[])) rows.push([currentUser,p.lat,p.lon,p.fire_count,p.frequency??'', p.priority??1 ]);
       downloadCSV(`${currentUser}_selected_raw_points.csv`, rows);
     }
+
+
     function exportAllUsers() {
       if (obsDates.length === 0) {
         alert('Please set the observation window in Step 4.');
@@ -947,7 +981,7 @@ if (nPred >= CONFIRM_THRESHOLD) {
       const defInt = Math.max(1, Math.floor(+document.getElementById('defaultInterval').value || 4));
 
       const rows = [[
-        'user','window_start_utc','window_end_utc','satellites','point_id','lat','lon','required_interval_hours'
+        'user','window_start_utc','window_end_utc','satellites','point_id','lat','lon','required_interval_hours','priority'
       ]];
 
       let count = 0;
@@ -955,7 +989,7 @@ if (nPred >= CONFIRM_THRESHOLD) {
         const satStr = [...(satellitesByUser[uname] || new Set())].join(';');
         for (const p of arr) {
           const req = (p.frequency == null || p.frequency === '') ? defInt : p.frequency;
-          rows.push([uname, start, end, satStr, p.id, p.lat, p.lon, req]);
+          rows.push([uname, start, end, satStr, p.id, p.lat, p.lon, req, (p.priority??1)]);
           count++;
         }
       }
@@ -965,6 +999,8 @@ if (nPred >= CONFIRM_THRESHOLD) {
       const statusEl = document.getElementById('exportStatus');
       if (statusEl) statusEl.textContent = `Exported ${count} task rows across ${Object.keys(users).length} user(s).`;
     }
+
+
     function exportTaskCSV(){
       if(!currentUser){ alert('Please select a user.'); return; }
       if((users[currentUser]||[]).length===0){ alert('No points for current user.'); return; }
@@ -973,10 +1009,14 @@ if (nPred >= CONFIRM_THRESHOLD) {
       const end=obsDates[obsDates.length-1] + ' 23:59:59Z';
       const satStr=[...getCurrentSatSet()].join(';');
       const def=Math.max(1,Math.floor(+document.getElementById('defaultInterval').value||4));
-      const rows=[[ 'user','window_start_utc','window_end_utc','satellites','point_id','lat','lon','required_interval_hours' ]];
-      for(const p of (users[currentUser]||[])){ const req=(p.frequency==null||p.frequency==='')?def:p.frequency; rows.push([ currentUser,start,end,satStr,p.id,p.lat,p.lon,req ]); }
+      const rows=[[ 'user','window_start_utc','window_end_utc','satellites','point_id','lat','lon','required_interval_hours','priority' ]];
+      for(const p of (users[currentUser]||[])){
+        const req=(p.frequency==null||p.frequency==='')?def:p.frequency;
+        rows.push([ currentUser,start,end,satStr,p.id,p.lat,p.lon,req,(p.priority??1) ]);
+      }
       downloadCSV(`task_request_${currentUser||'user'}_${obsDates[0]}_${obsDates[obsDates.length-1]}.csv`, rows);
     }
+
 
     // =========================
     // Right-click add custom point
@@ -991,6 +1031,7 @@ if (nPred >= CONFIRM_THRESHOLD) {
           <div>Lat: ${lat}, Lon: ${lon}</div>
           <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
             <label>Freq (h) <input id="popupFreq" type="number" min="0" step="1" style="width:80px"/></label>
+            <label>Priority <input id="popupPri" type="number" min="0" max="1" step="0.1" value="1" style="width:80px"/></label>
             <button id="popupAdd" class="small-btn">Add</button>
             <button id="popupCancel" class="small-btn ghost">Cancel</button>
           </div>
@@ -1004,7 +1045,14 @@ if (nPred >= CONFIRM_THRESHOLD) {
         if(addBtn){
           addBtn.addEventListener('click', ()=>{
             const freqVal = (freqInp && freqInp.value!=='' ? Math.max(0, Math.floor(+freqInp.value)) : null);
-            addCustomPoint(lat, lon, freqVal);
+            let priVal = 1;
+            const priInp = document.getElementById('popupPri');
+            if (priInp && priInp.value!=='') {
+              priVal = +priInp.value;
+              if (isNaN(priVal)) priVal = 1;
+              priVal = Math.max(0, Math.min(1, priVal));
+            }
+            addCustomPoint(lat, lon, freqVal, priVal);
             map.closePopup(pendingPopup); pendingPopup=null;
           });
         }
