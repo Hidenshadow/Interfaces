@@ -960,7 +960,7 @@ if (nPred >= CONFIRM_THRESHOLD) {
     // =========================
     // Exports
     // =========================
-    function toCSV(rows){ const esc=s=>'\"'+String(s).replace(/\"/g,'\"\"')+'\"'; return rows.map(r=>r.map(esc).join(',')).join('\\n'); }
+    function toCSV(rows){ const esc=s=>'\"'+String(s).replace(/\"/g,'\"\"')+'\"'; return rows.map(r=>r.map(esc).join(',')).join('\r\n'); }
     function downloadCSV(filename, rows){ const blob=new Blob([toCSV(rows)],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); }
 
     function exportCurrentUser(){
