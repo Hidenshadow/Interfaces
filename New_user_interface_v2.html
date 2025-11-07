@@ -965,10 +965,20 @@ if (nPred >= CONFIRM_THRESHOLD) {
 
     function exportCurrentUser(){
       if(!currentUser){ alert('Please select a user.'); return; }
-      const rows=[["username","lat","lon","fire_count","frequency_hours","priority"]];
-      for(const p of (users[currentUser]||[])) rows.push([currentUser,p.lat,p.lon,p.fire_count,p.frequency??'', p.priority??1 ]);
+      const rows = [["user","lat","lon","fire_count","frequency_hours","priority"]]; // username -> user
+      for(const p of (users[currentUser]||[])){
+        rows.push([
+          currentUser,
+          (+p.lat).toFixed(5),
+          (+p.lon).toFixed(5),
+          p.fire_count,
+          p.frequency ?? '',
+          (p.priority ?? 1)
+        ]);
+      }
       downloadCSV(`${currentUser}_selected_raw_points.csv`, rows);
     }
+
 
 
     function exportAllUsers() {
